@@ -36,6 +36,44 @@ function useFullscreen() {
   return { supported, active, toggle };
 }
 
+const iconProps = {
+  width: 20,
+  height: 20,
+  viewBox: "0 0 24 24",
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+  "aria-hidden": true,
+} as const;
+
+/** Speaker with sound waves (on) or a cross (off). */
+function SoundIcon({ on }: { on: boolean }) {
+  return (
+    <svg {...iconProps}>
+      <path d="M4 9v6h4l5 4V5L8 9H4z" />
+      {on ? <path d="M16.5 9a4 4 0 0 1 0 6M19 6.5a8 8 0 0 1 0 11" /> : <path d="M17 9l5 6M22 9l-5 6" />}
+    </svg>
+  );
+}
+
+/** Ring with eight teeth. */
+function GearIcon() {
+  const teeth = Array.from({ length: 8 }, (_, i) => {
+    const a = (i * Math.PI) / 4;
+    const p = (r: number) => `${(12 + Math.cos(a) * r).toFixed(2)} ${(12 + Math.sin(a) * r).toFixed(2)}`;
+    return `M${p(7.5)}L${p(10.5)}`;
+  }).join("");
+  return (
+    <svg {...iconProps}>
+      <circle cx="12" cy="12" r="6" />
+      <circle cx="12" cy="12" r="2.2" />
+      <path d={teeth} />
+    </svg>
+  );
+}
+
 function useViewport() {
   const [vp, setVp] = useState({ w: window.innerWidth, h: window.innerHeight });
   useEffect(() => {
@@ -171,17 +209,23 @@ export default function App() {
           )}
           <button
             type="button"
-            className={`btn ${settings.muted ? "warn" : ""}`}
+            className={`btn icon ${settings.muted ? "warn" : ""}`}
             aria-pressed={settings.muted}
+            aria-label={settings.muted ? "Sound off: tap to unmute" : "Sound on: tap to mute"}
+            title={settings.muted ? "Sound off" : "Sound on"}
             onClick={() => update({ muted: !settings.muted })}
           >
-            {settings.muted ? "Muted" : "Mute"}
+            <SoundIcon on={!settings.muted} />
           </button>
-          <button type="button" className="btn danger" onClick={() => engine.stopAll()}>
-            Stop all
-          </button>
-          <button type="button" className="btn" aria-expanded={panelOpen} onClick={() => setPanelOpen((o) => !o)}>
-            Controls
+          <button
+            type="button"
+            className="btn icon"
+            aria-expanded={panelOpen}
+            aria-label="Settings"
+            title="Settings"
+            onClick={() => setPanelOpen((o) => !o)}
+          >
+            <GearIcon />
           </button>
         </div>
       </div>
