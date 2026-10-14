@@ -91,6 +91,24 @@ export function ControlPanel({ settings: s, update, onStopAll, onClose, readoutR
       </div>
 
       <div className="field">
+        <span>Orientation</span>
+        <div className="seg" role="radiogroup" aria-label="Orientation">
+          {(["landscape", "portrait"] as const).map((o) => (
+            <button
+              key={o}
+              type="button"
+              role="radio"
+              aria-checked={s.orientation === o}
+              className={s.orientation === o ? "on" : ""}
+              onClick={() => update({ orientation: o })}
+            >
+              {o === "landscape" ? "Landscape" : "Portrait"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="field">
         <span>Sound</span>
         <div className="seg" role="radiogroup" aria-label="Sound preset">
           {(Object.keys(PRESETS) as PresetId[]).map((id) => (

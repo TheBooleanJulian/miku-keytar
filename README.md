@@ -71,6 +71,15 @@ sawtooth ─┘                                                         ├─ v
 Every touch spawns a cyan line through the touched point at a random angle. If the touch is held longer than 220 ms
 (a rapid tap is shorter), expanding, rotating cyan squares ripple out from the finger until release, then fade.
 
+### Orientation
+
+Controls → **Orientation** switches the instrument between Landscape and Portrait. Touch devices start in
+Landscape even when held upright; desktop starts to match its window. If the screen's shape disagrees with the
+chosen orientation, the whole app is laid out at the swapped size and rotated 90° clockwise with CSS (so it works on
+iOS, which cannot lock orientation), and pointer coordinates are mapped back into canvas space (`Instrument.setRotated`).
+Turn the phone sideways (counter-clockwise) to use it in Landscape. If the OS auto-rotates the page into
+a matching shape, no CSS rotation is applied.
+
 ### Structure
 
 ```

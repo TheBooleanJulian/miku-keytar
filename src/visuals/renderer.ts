@@ -12,7 +12,7 @@ const MONO = '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, m
 const CYAN = "#22E8FF";
 const HOLD_MS = 220; // pressed at least this long = a hold (shows ripples), shorter = a tap (line only)
 const FLASH_MS = 600;
-const RING_PERIOD = 1300;
+const RING_PERIOD = 1800;
 const RING_COUNT = 4;
 const RIPPLE_FADE_MS = 350;
 
@@ -31,6 +31,9 @@ class Trail {
   downT = 0; // when the touch began
   endT = 0; // when it ended (0 while held)
   rot = 0; // random starting rotation for the hold ripples
+  downX = 0; // where the touch began (ripple origin)
+  downY = 0;
+  reach = 0; // final ripple side length
 
   color = 0;
   count = 0;
@@ -147,6 +150,10 @@ export class Renderer {
     tr.downT = now;
     tr.endT = 0;
     tr.rot = Math.random() * Math.PI;
+    tr.downX = x;
+    tr.downY = y;
+    // Side length at which the square's inscribed circle clears the farthest screen corner.
+    tr.reach = 2 * Math.hypot(Math.max(x, this.w - x), Math.max(y, this.h - y)) * 1.05;
     const f = this.flashes[this.flashCursor++ % this.flashes.length];
     f.active = true;
     f.x = x;
@@ -346,8 +353,9 @@ export class Renderer {
   private drawFlash(f: Flash, now: number): void {
     const c = this.ctx;
     const age = now - f.t0;
-    const grow = Math.min(age / 160, 1);
-    const half = 30 + 110 * (1 - (1 - grow) * (1 - grow) * (1 - grow));
+    const grow = Math.min(age / 220, 1);
+    // Reaches the screen diagonal from either side, so the line always spans the whole screen.
+    const half = 30 + (Math.hypot(this.w, this.h) - 30) * (1 - (1 - grow) * (1 - grow) * (1 - grow));
     const a = 1 - age / FLASH_MS;
     const dx = Math.cos(f.angle) * half;
     const dy = Math.sin(f.angle) * half;
@@ -372,19 +380,19 @@ export class Renderer {
     const fade = t.active ? 1 : 1 - (now - t.endT) / RIPPLE_FADE_MS;
     if (fade <= 0) return;
     const c = this.ctx;
-    const last = (t.head - 1 + MAX_POINTS) % MAX_POINTS;
-    const x = t.xs[last] * this.dpr;
-    const y = t.ys[last] * this.dpr;
+    const x = t.downX * this.dpr; // anchored where the touch began, not following the finger
+    const y = t.downY * this.dpr;
+    const reach = t.reach;
     const rings = this.reduced ? 2 : RING_COUNT;
     const elapsed = now - t.downT - HOLD_MS;
     for (let k = 0; k < rings; k++) {
       const age = elapsed - (k * RING_PERIOD) / rings;
       if (age < 0) continue;
       const phase = (age % RING_PERIOD) / RING_PERIOD;
-      let size = 24 + phase * 150;
-      if (!this.reduced) size *= 1 + 0.05 * Math.sin(age / 90); // ripple wobble
+      let size = 24 + phase * reach;
+      if (!this.reduced) size *= 1 + 0.03 * Math.sin(age / 90); // ripple wobble
       const rot = t.rot + age * 0.0012 + phase * 1.2;
-      const a = (1 - phase) * fade * Math.min(1, age / 120);
+      const a = (1 - phase * phase) * fade * Math.min(1, age / 120);
       const cos = Math.cos(rot) * this.dpr;
       const sin = Math.sin(rot) * this.dpr;
       c.setTransform(cos, sin, -sin, cos, x, y);

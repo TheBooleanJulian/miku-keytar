@@ -33,6 +33,20 @@ function useFullscreen() {
   return { supported, active, toggle };
 }
 
+function useViewport() {
+  const [vp, setVp] = useState({ w: window.innerWidth, h: window.innerHeight });
+  useEffect(() => {
+    const sync = () => setVp({ w: window.innerWidth, h: window.innerHeight });
+    window.addEventListener("resize", sync);
+    window.addEventListener("orientationchange", sync);
+    return () => {
+      window.removeEventListener("resize", sync);
+      window.removeEventListener("orientationchange", sync);
+    };
+  }, []);
+  return vp;
+}
+
 export default function App() {
   const engineRef = useRef<AudioEngine | null>(null);
   if (!engineRef.current) engineRef.current = new AudioEngine();
@@ -83,9 +97,21 @@ export default function App() {
 
   const running = audio === "running";
 
+  // If the screen's shape disagrees with the chosen orientation, lay the app out at the swapped
+  // size and rotate it 90° clockwise (works on iOS, which can't lock orientation).
+  const vp = useViewport();
+  const screenLandscape = vp.w >= vp.h;
+  const rotated = (settings.orientation === "landscape") !== screenLandscape;
+  const rotatedStyle = rotated
+    ? { width: vp.h, height: vp.w, transform: `translateX(${vp.w}px) rotate(90deg)` }
+    : undefined;
+
   return (
-    <div className="app">
-      <PlayingSurface engine={engine} settings={settings} onReadout={onReadout} />
+    <div
+      className={`app ${settings.orientation === "landscape" ? "land" : "port"}${rotated ? " rotated" : ""}`}
+      style={rotatedStyle}
+    >
+      <PlayingSurface engine={engine} settings={settings} onReadout={onReadout} rotated={rotated} />
 
       {!running && (
         <div className="overlay">

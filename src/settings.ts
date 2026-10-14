@@ -14,6 +14,8 @@ export interface Settings {
   modulation: boolean;
   guides: boolean;
   reduced: boolean;
+  /** Layout the instrument is drawn in. If the screen disagrees, the app is rotated 90° to match. */
+  orientation: "landscape" | "portrait";
 }
 
 const KEY = "miku-keytar:settings:v1";
@@ -25,7 +27,15 @@ export function defaultSettings(): Settings {
   } catch {
     // matchMedia unavailable
   }
+  let coarse = false; // touch-first device (phone / tablet)
+  try {
+    coarse = window.matchMedia("(pointer: coarse)").matches;
+  } catch {
+    // matchMedia unavailable
+  }
   return {
+    // Phones start in landscape even when held upright; desktop just matches its window.
+    orientation: coarse || window.innerWidth >= window.innerHeight ? "landscape" : "portrait",
     volume: 0.7,
     muted: false,
     root: 0,
@@ -69,6 +79,7 @@ export function loadSettings(): Settings {
       modulation: bool(s.modulation, d.modulation),
       guides: bool(s.guides, d.guides),
       reduced: bool(s.reduced, d.reduced),
+      orientation: s.orientation === "landscape" || s.orientation === "portrait" ? s.orientation : d.orientation,
     };
   } catch {
     return d;

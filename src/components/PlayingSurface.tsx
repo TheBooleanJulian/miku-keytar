@@ -9,10 +9,12 @@ interface Props {
   engine: AudioEngine;
   settings: Settings;
   onReadout: (midi: number, brightness: number) => void;
+  /** True when the whole app is CSS-rotated 90° relative to the screen. */
+  rotated: boolean;
 }
 
 /** Owns the canvas. React only re-renders this on settings changes, never per pointer move. */
-export function PlayingSurface({ engine, settings, onReadout }: Props) {
+export function PlayingSurface({ engine, settings, onReadout, rotated }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<Renderer | null>(null);
   const instrumentRef = useRef<Instrument | null>(null);
@@ -42,6 +44,10 @@ export function PlayingSurface({ engine, settings, onReadout }: Props) {
     instrumentRef.current?.setLayout(layout);
     rendererRef.current?.setLayout(layout, guides);
   }, [layout, guides]);
+
+  useEffect(() => {
+    instrumentRef.current?.setRotated(rotated);
+  }, [rotated]);
 
   useEffect(() => {
     rendererRef.current?.setReduced(reduced);

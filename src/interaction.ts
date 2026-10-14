@@ -26,6 +26,7 @@ export class Instrument {
   private touches = new Map<number, Touch>();
   private layout: PitchLayout | null = null;
   private rect: DOMRect;
+  private rotated = false;
   private readoutQueued = false;
   private readoutMidi = 0;
   private readoutBrightness = 0;
@@ -94,12 +95,28 @@ export class Instrument {
     this.rect = this.canvas.getBoundingClientRect();
   };
 
+  /** The app is rotated 90° clockwise on screen: map screen coords back into canvas space. */
+  setRotated(rotated: boolean): void {
+    this.rotated = rotated;
+    this.refreshRect();
+  }
+
   private read(e: PointerEvent, t: Touch): void {
     const r = this.rect;
-    t.px = e.clientX - r.left;
-    t.py = e.clientY - r.top;
-    t.xn = clamp01(t.px / r.width);
-    t.yn = clamp01((1 - t.py / r.height - Y_MARGIN) / (1 - 2 * Y_MARGIN));
+    let w = r.width;
+    let h = r.height;
+    if (this.rotated) {
+      // the rect is the rotated bounding box, so canvas width/height swap
+      t.px = e.clientY - r.top;
+      t.py = r.right - e.clientX;
+      w = r.height;
+      h = r.width;
+    } else {
+      t.px = e.clientX - r.left;
+      t.py = e.clientY - r.top;
+    }
+    t.xn = clamp01(t.px / w);
+    t.yn = clamp01((1 - t.py / h - Y_MARGIN) / (1 - 2 * Y_MARGIN));
     t.midi = xToMidi(this.layout!, t.xn);
   }
 
