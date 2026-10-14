@@ -58,6 +58,17 @@ function SoundIcon({ on }: { on: boolean }) {
   );
 }
 
+/** Metronome; the arm swings while the rhythm is running (see .live in styles.css). */
+function MetronomeIcon() {
+  return (
+    <svg {...iconProps}>
+      <path d="M9 21L10.5 3h3L15 21z" />
+      <path d="M6 21h12" />
+      <path className="arm" d="M12 17L15.5 7" />
+    </svg>
+  );
+}
+
 /** Ring with eight teeth. */
 function GearIcon() {
   const teeth = Array.from({ length: 8 }, (_, i) => {
@@ -199,12 +210,14 @@ export default function App() {
           {chordMode === "rhythm" && (
             <button
               type="button"
-              className={`btn ${chordUi.rhythmRunning ? "live" : ""}`}
+              className={`btn icon ${chordUi.rhythmRunning ? "live" : ""}`}
               aria-pressed={chordUi.rhythmRunning}
+              aria-label={chordUi.rhythmRunning ? "Stop rhythm" : "Start rhythm"}
+              title={chordUi.rhythmRunning ? "Stop rhythm" : "Start rhythm"}
               disabled={!running}
               onClick={() => harmony.toggleRhythm()}
             >
-              {chordUi.rhythmRunning ? "■ Rhythm" : "▶ Rhythm"}
+              <MetronomeIcon />
             </button>
           )}
           <button
