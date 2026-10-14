@@ -71,6 +71,33 @@ sawtooth ─┘                                                         ├─ v
 Every touch spawns a cyan line through the touched point at a random angle. If the touch is held longer than 220 ms
 (a rapid tap is shorter), expanding, rotating cyan squares ripple out from the finger until release, then fade.
 
+### Chords
+
+A bar of seven buttons along the bottom plays the **diatonic chords** of the key chosen in Controls → Chords
+(key root + major/natural minor, optional 7th chords). Buttons show the roman numeral and chord name, e.g. `V / G`
+in C major, `vii° / Bdim`.
+
+- **Rubato:** a chord sounds while its button is held (several can be held at once). Chord voices play under the melody.
+- **With rhythm:** tapping a chord selects it and starts the rhythm engine; the chord stays latched (highlighted)
+  until you pick another. The ▶/■ Rhythm button in the top bar starts and stops the groove. Stop all also stops it.
+- **Melody snapping:** while a chord is sounding or latched, a melody finger that stays still (within 8 px) for the
+  configured delay (default 500 ms, 150–2000 ms in Controls) is retuned to the **nearest chord tone**. Moving the finger
+  returns to normal scale pitch; releasing a rubato chord un-snaps held notes. Toggle it off with “Snap melody to chord”.
+- “Set melody scale to … ” copies the key into the melody root/scale so the two agree.
+
+### Rhythm engine (`src/audio/rhythm.ts`, `patterns.ts`)
+
+A 16-step sequencer (look-ahead scheduling on the AudioContext clock, so timing doesn't depend on UI frames) with four
+synthesised layers, each switchable: **drums** (kick, snare, closed/open hat), **bass** (saw + sine through a low-pass,
+follows the chord root/fifth), **pad** (detuned saws, sustained or stabbed) and an **arp pluck** (square through a
+decaying low-pass, plays chord tones). Bass, pad and arp always follow the active chord; with no chord chosen, only
+drums play. Ten patterns, each with a default tempo (adjustable 50–200 BPM) and swing:
+
+1. Pop Rock · 2. Four on the Floor · 3. Pop Ballad · 4. Funk · 5. Reggae One Drop · 6. Hip-Hop · 7. Bossa Nova ·
+8. Blues Shuffle · 9. Trap · 10. Synthwave
+
+Patterns are plain 16-character strings in `patterns.ts` (legend at the top of the file), so adding one is a data edit.
+
 ### Orientation
 
 Controls → **Orientation** switches the instrument between Landscape and Portrait. Touch devices start in
@@ -86,6 +113,10 @@ a matching shape, no CSS rotation is applied.
 src/audio/pitchmap.ts   scales, x → note snapping (pure functions)
 src/audio/presets.ts    preset definitions + brightness → cutoff curve
 src/audio/engine.ts     AudioEngine: context, graph, voices, suspend/resume
+src/audio/chords.ts     diatonic chords, voicings, nearest chord tone (pure)
+src/audio/patterns.ts   the ten rhythm patterns (data)
+src/audio/rhythm.ts     step sequencer + drum/bass/pad/arp synthesis
+src/harmony.ts          chord state shared by chord bar, melody and rhythm
 src/interaction.ts      Pointer Events → engine + renderer (no React state per move)
 src/visuals/renderer.ts Canvas: grid, trails, glow, pulse (preallocated, rAF loop)
 src/components/         PlayingSurface (canvas host), ControlPanel
@@ -97,7 +128,10 @@ live readout writes to the DOM once per animation frame. The render loop skips d
 
 ## Testing
 
-### Automated (`npm test`, 13 tests)
+### Automated (`npm test`, 26 tests)
+- Chord theory: C major / A minor triads, 7th chords, roman numerals, voicings, nearest-chord-tone search.
+- Rhythm: all ten patterns are well-formed; each schedules a full bar against a fake clock without errors; stop
+  halts scheduling; muted layers add nothing; drums-only when no chord is chosen.
 - Scale layouts, edge mapping, snapping only to scale notes, chromatic semitone coverage, note names/frequencies.
 - Logarithmic, monotonic brightness → cutoff curve.
 - Audio voice lifecycle against a fake `AudioContext`: notes are ignored until audio is running; four simultaneous
@@ -111,6 +145,10 @@ live readout writes to the DOM once per animation frame. The render loop skips d
 - No console errors or warnings.
 
 ### Manual checklist (needs a real device / ears: not verifiable headlessly)
+- [ ] Rhythm engine: all ten patterns sound musical; drum/bass/pad/arp balance and tempo feel right; no clicks when
+      changing chords or pattern mid-groove. (Mix levels were set conservatively without listening: tune the
+      `LAYER_LEVEL` and per-instrument peaks in `rhythm.ts` by ear.)
+- [ ] Chord bar: hold chords with one thumb while playing melody with another; snap delay feels right.
 - [ ] Desktop mouse playback; drag across the surface and release outside the window.
 - [ ] Single-finger melody on iOS Safari and Android Chrome.
 - [ ] Four-finger playback; releasing fingers in different orders.

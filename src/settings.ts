@@ -1,4 +1,7 @@
+import type { KeyMode } from "./audio/chords.ts";
+import { PATTERNS } from "./audio/patterns.ts";
 import { SCALES, type ScaleId } from "./audio/pitchmap.ts";
+import type { RhythmLayers } from "./audio/rhythm.ts";
 import { PRESETS, type PresetId } from "./audio/presets.ts";
 
 export interface Settings {
@@ -16,6 +19,18 @@ export interface Settings {
   reduced: boolean;
   /** Layout the instrument is drawn in. If the screen disagrees, the app is rotated 90° to match. */
   orientation: "landscape" | "portrait";
+  // chords
+  keyRoot: number; // 0..11
+  keyMode: KeyMode;
+  sevenths: boolean;
+  chordMode: "rubato" | "rhythm";
+  chordSnap: boolean; // snap held melody notes to chord tones
+  snapDelay: number; // ms a finger must stay still before it snaps
+  // rhythm
+  pattern: number; // index into PATTERNS
+  bpm: number;
+  layers: RhythmLayers;
+  rhythmVolume: number;
 }
 
 const KEY = "miku-keytar:settings:v1";
@@ -36,6 +51,16 @@ export function defaultSettings(): Settings {
   return {
     // Phones start in landscape even when held upright; desktop just matches its window.
     orientation: coarse || window.innerWidth >= window.innerHeight ? "landscape" : "portrait",
+    keyRoot: 0,
+    keyMode: "major",
+    sevenths: false,
+    chordMode: "rubato",
+    chordSnap: true,
+    snapDelay: 500,
+    pattern: 0,
+    bpm: PATTERNS[0].bpm,
+    layers: { drums: true, bass: true, pad: true, arp: true },
+    rhythmVolume: 0.7,
     volume: 0.7,
     muted: false,
     root: 0,
@@ -66,6 +91,7 @@ export function loadSettings(): Settings {
     const raw = localStorage.getItem(KEY);
     if (!raw) return d;
     const s = JSON.parse(raw) as Record<string, unknown>;
+    const layers = (typeof s.layers === "object" && s.layers !== null ? s.layers : {}) as Record<string, unknown>;
     return {
       volume: typeof s.volume === "number" && s.volume >= 0 && s.volume <= 1 ? s.volume : d.volume,
       muted: bool(s.muted, d.muted),
@@ -80,6 +106,21 @@ export function loadSettings(): Settings {
       guides: bool(s.guides, d.guides),
       reduced: bool(s.reduced, d.reduced),
       orientation: s.orientation === "landscape" || s.orientation === "portrait" ? s.orientation : d.orientation,
+      keyRoot: int(s.keyRoot, 0, 11, d.keyRoot),
+      keyMode: s.keyMode === "major" || s.keyMode === "minor" ? s.keyMode : d.keyMode,
+      sevenths: bool(s.sevenths, d.sevenths),
+      chordMode: s.chordMode === "rubato" || s.chordMode === "rhythm" ? s.chordMode : d.chordMode,
+      chordSnap: bool(s.chordSnap, d.chordSnap),
+      snapDelay: int(s.snapDelay, 150, 2000, d.snapDelay),
+      pattern: int(s.pattern, 0, PATTERNS.length - 1, d.pattern),
+      bpm: int(s.bpm, 50, 200, d.bpm),
+      layers: {
+        drums: bool(layers.drums, true),
+        bass: bool(layers.bass, true),
+        pad: bool(layers.pad, true),
+        arp: bool(layers.arp, true),
+      },
+      rhythmVolume: typeof s.rhythmVolume === "number" && s.rhythmVolume >= 0 && s.rhythmVolume <= 1 ? s.rhythmVolume : d.rhythmVolume,
     };
   } catch {
     return d;

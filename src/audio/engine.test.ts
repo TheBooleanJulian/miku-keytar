@@ -2,79 +2,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { AudioEngine } from "./engine.ts";
-
-class FakeParam {
-  value = 0;
-  setValueAtTime(v: number) {
-    this.value = v;
-    return this;
-  }
-  setTargetAtTime() {
-    return this;
-  }
-  linearRampToValueAtTime() {
-    return this;
-  }
-  cancelScheduledValues() {
-    return this;
-  }
-}
-
-interface FakeNode {
-  stopCalls: number;
-  startCalls: number;
-  [key: string]: unknown;
-}
-
-function fakeNode(): FakeNode {
-  const target: Record<string, unknown> = {
-    stopCalls: 0,
-    startCalls: 0,
-    connect: (n: unknown) => n,
-    disconnect: () => {},
-    start() {
-      (this as FakeNode).startCalls++;
-    },
-    stop() {
-      (this as FakeNode).stopCalls++;
-    },
-  };
-  // Any other property read is treated as an AudioParam.
-  return new Proxy(target, {
-    get(t, p) {
-      if (typeof p === "string" && !(p in t)) t[p] = new FakeParam();
-      return t[p as string];
-    },
-  }) as FakeNode;
-}
+import { makeFakeContext, type FakeNode } from "./fake-context.ts";
 
 function setup() {
-  const oscs: FakeNode[] = [];
-  const ctx = {
-    state: "suspended",
-    currentTime: 0,
-    destination: fakeNode(),
-    onstatechange: null as null | (() => void),
-    createGain: fakeNode,
-    createBiquadFilter: fakeNode,
-    createDelay: fakeNode,
-    createConvolver: fakeNode,
-    sampleRate: 8000,
-    createBuffer: (_ch: number, len: number) => ({ getChannelData: () => new Float32Array(len) }),
-    createDynamicsCompressor: fakeNode,
-    createAnalyser: () => Object.assign(fakeNode(), { fftSize: 256 }),
-    createOscillator: () => {
-      const o = fakeNode();
-      oscs.push(o);
-      return o;
-    },
-    async resume() {
-      ctx.state = "running";
-      ctx.onstatechange?.();
-    },
-    async close() {},
-  };
-  const engine = new AudioEngine(() => ctx as unknown as AudioContext);
+  const { ctx, oscs, asContext } = makeFakeContext();
+  const engine = new AudioEngine(asContext);
   return { ctx, engine, oscs };
 }
 
@@ -136,8 +68,8 @@ test("stopAll silences everything, including releasing voices, and notifies", as
 test("voice count is capped by stealing the oldest", async () => {
   const { engine } = setup();
   await engine.init();
-  for (let id = 1; id <= 14; id++) engine.noteOn(id, 60, 0.5);
-  assert.equal(engine.activeVoiceCount, 10);
+  for (let id = 1; id <= 20; id++) engine.noteOn(id, 60, 0.5);
+  assert.equal(engine.activeVoiceCount, 16);
 });
 
 test("moving or releasing an unknown voice is harmless", async () => {
@@ -146,4 +78,11 @@ test("moving or releasing an unknown voice is harmless", async () => {
   engine.noteMove(99, 60, 0.5);
   engine.noteOff(99);
   assert.equal(engine.activeVoiceCount, 0);
+});
+
+test("rhythm target is only available once audio is built", async () => {
+  const { engine } = setup();
+  assert.equal(engine.rhythmTarget(), null);
+  await engine.init();
+  assert.ok(engine.rhythmTarget());
 });

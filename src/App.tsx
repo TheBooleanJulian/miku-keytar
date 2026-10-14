@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { diatonicChords } from "./audio/chords.ts";
 import { AudioEngine, type EngineState } from "./audio/engine.ts";
 import { midiToName } from "./audio/pitchmap.ts";
+import { ChordBar } from "./components/ChordBar.tsx";
 import { ControlPanel } from "./components/ControlPanel.tsx";
+import { Harmony, type HarmonyState } from "./harmony.ts";
 import { PlayingSurface } from "./components/PlayingSurface.tsx";
 import { loadSettings, saveSettings, type Settings } from "./settings.ts";
 
@@ -51,6 +54,10 @@ export default function App() {
   const engineRef = useRef<AudioEngine | null>(null);
   if (!engineRef.current) engineRef.current = new AudioEngine();
   const engine = engineRef.current;
+  const harmonyRef = useRef<Harmony | null>(null);
+  if (!harmonyRef.current) harmonyRef.current = new Harmony(engine);
+  const harmony = harmonyRef.current;
+  const [chordUi, setChordUi] = useState<HarmonyState>({ mask: 0, rhythmRunning: false });
 
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [audio, setAudio] = useState<EngineState>("idle");
@@ -61,11 +68,20 @@ export default function App() {
 
   useEffect(() => {
     const off = engine.onState(setAudio);
+    const offChords = harmony.onChange(setChordUi);
     return () => {
       off();
+      offChords();
+      harmony.dispose();
       engine.dispose();
     };
-  }, [engine]);
+  }, [engine, harmony]);
+
+  const { keyRoot, keyMode, sevenths, chordMode, pattern, bpm, layers } = settings;
+  useEffect(() => {
+    harmony.configure({ keyRoot, keyMode, sevenths, chordMode, pattern, bpm, layers });
+  }, [harmony, keyRoot, keyMode, sevenths, chordMode, pattern, bpm, layers]);
+  const chords = useMemo(() => diatonicChords(keyRoot, keyMode, sevenths), [keyRoot, keyMode, sevenths]);
 
   useEffect(() => {
     engine.configure(settings);
@@ -111,7 +127,14 @@ export default function App() {
       className={`app ${settings.orientation === "landscape" ? "land" : "port"}${rotated ? " rotated" : ""}`}
       style={rotatedStyle}
     >
-      <PlayingSurface engine={engine} settings={settings} onReadout={onReadout} rotated={rotated} />
+      <PlayingSurface engine={engine} settings={settings} onReadout={onReadout} rotated={rotated} chords={harmony} />
+
+      <ChordBar
+        chords={chords}
+        mask={chordUi.mask}
+        onPress={(degree, pointerId) => harmony.press(pointerId, degree)}
+        onRelease={(pointerId) => harmony.release(pointerId)}
+      />
 
       {!running && (
         <div className="overlay">
@@ -130,8 +153,22 @@ export default function App() {
       )}
 
       <div className="topbar">
-        <span className="brand mono">MIKU KEYTAR</span>
+        <div className="brand mono">
+          <span>MIKU KEYTAR</span>
+          <small>Built by TheBooleanJulian</small>
+        </div>
         <div className="actions">
+          {chordMode === "rhythm" && (
+            <button
+              type="button"
+              className={`btn ${chordUi.rhythmRunning ? "live" : ""}`}
+              aria-pressed={chordUi.rhythmRunning}
+              disabled={!running}
+              onClick={() => harmony.toggleRhythm()}
+            >
+              {chordUi.rhythmRunning ? "■ Rhythm" : "▶ Rhythm"}
+            </button>
+          )}
           <button
             type="button"
             className={`btn ${settings.muted ? "warn" : ""}`}

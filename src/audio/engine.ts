@@ -16,6 +16,8 @@ export interface EngineSettings {
   effects: boolean;
   modulation: boolean;
   glide: boolean;
+  /** Level of the rhythm section (drums, bass, pad, arp), 0..1. */
+  rhythmVolume: number;
 }
 
 interface Voice {
@@ -33,6 +35,7 @@ interface Graph {
   wet: GainNode;
   chorusWet: GainNode;
   reverbWet: GainNode;
+  rhythmBus: GainNode;
   lfoGain: GainNode;
   analyser: AnalyserNode;
 }
@@ -40,7 +43,7 @@ interface Graph {
 const OSC_TYPES: OscillatorType[] = ["sine", "triangle", "sawtooth", "square"];
 const DETUNE_SIGN = [0, 1, -1, 0];
 const VOICE_PEAK = 0.22;
-const MAX_VOICES = 10;
+const MAX_VOICES = 16; // touches + held chord notes
 const PITCH_TC_SNAP = 0.005; // seconds: short enough to feel instant, long enough to avoid a click
 const PITCH_TC_GLIDE = 0.07;
 const PARAM_TC = 0.025;
@@ -66,6 +69,7 @@ export class AudioEngine {
     effects: true,
     modulation: false,
     glide: false,
+    rhythmVolume: 0.7,
   };
   private failed = false;
   private levelBuf: Uint8Array<ArrayBuffer> | null = null;
@@ -172,7 +176,13 @@ export class AudioEngine {
 
   // ---- voices ------------------------------------------------------------
 
-  noteOn(id: number, midi: number, brightness: number): void {
+  /** Context + node the rhythm engine plays into (it bypasses the lead effects, not the compressor). */
+  rhythmTarget(): { ctx: AudioContext; out: AudioNode } | null {
+    return this.ctx && this.graph ? { ctx: this.ctx, out: this.graph.rhythmBus } : null;
+  }
+
+  /** `level` scales the voice's loudness (chords sit under the melody). */
+  noteOn(id: number, midi: number, brightness: number, level = 1): void {
     const ctx = this.ctx;
     const g = this.graph;
     if (!ctx || !g || ctx.state !== "running") return;
@@ -215,7 +225,7 @@ export class AudioEngine {
     }
 
     // setTargetAtTime (not a linear ramp) so a release can start from wherever the attack is.
-    env.gain.setTargetAtTime(VOICE_PEAK, now, p.attack / 3);
+    env.gain.setTargetAtTime(VOICE_PEAK * level, now, p.attack / 3);
     this.voices.set(id, { oscs, mixes, filter, env, brightness });
   }
 
@@ -336,6 +346,8 @@ export class AudioEngine {
     comp.ratio.value = 6;
     comp.attack.value = 0.003;
     comp.release.value = 0.2;
+    const rhythmBus = ctx.createGain();
+    rhythmBus.connect(comp);
     const master = ctx.createGain();
     const mute = ctx.createGain();
     const analyser = ctx.createAnalyser();
@@ -364,7 +376,7 @@ export class AudioEngine {
     lfo.connect(lfoGain);
     lfo.start();
 
-    this.graph = { voiceBus, master, mute, wet, chorusWet, reverbWet, lfoGain, analyser };
+    this.graph = { voiceBus, master, mute, wet, chorusWet, reverbWet, rhythmBus, lfoGain, analyser };
     ctx.onstatechange = () => this.emitState();
     if (typeof document !== "undefined") document.addEventListener("visibilitychange", this.onVisibility);
     this.applyGlobal();
@@ -380,6 +392,7 @@ export class AudioEngine {
     g.master.gain.setTargetAtTime(s.volume * s.volume, now, PARAM_TC); // squared: closer to perceived loudness
     g.mute.gain.setTargetAtTime(s.muted ? 0 : 1, now, PARAM_TC);
     g.wet.gain.setTargetAtTime(s.effects ? p.wet : 0, now, 0.05);
+    g.rhythmBus.gain.setTargetAtTime(s.rhythmVolume, now, PARAM_TC);
     g.chorusWet.gain.setTargetAtTime(s.effects ? p.chorus : 0, now, 0.05);
     g.reverbWet.gain.setTargetAtTime(s.effects ? p.reverb : 0, now, 0.05);
     g.lfoGain.gain.setTargetAtTime(s.modulation ? VIBRATO_CENTS : 0, now, 0.1);

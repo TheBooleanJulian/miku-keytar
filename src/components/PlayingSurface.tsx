@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { AudioEngine } from "../audio/engine.ts";
 import { buildLayout } from "../audio/pitchmap.ts";
-import { Instrument } from "../interaction.ts";
+import { Instrument, type ChordSource } from "../interaction.ts";
 import type { Settings } from "../settings.ts";
 import { Renderer } from "../visuals/renderer.ts";
 
@@ -11,23 +11,24 @@ interface Props {
   onReadout: (midi: number, brightness: number) => void;
   /** True when the whole app is CSS-rotated 90° relative to the screen. */
   rotated: boolean;
+  chords: ChordSource;
 }
 
 /** Owns the canvas. React only re-renders this on settings changes, never per pointer move. */
-export function PlayingSurface({ engine, settings, onReadout, rotated }: Props) {
+export function PlayingSurface({ engine, settings, onReadout, rotated, chords }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rendererRef = useRef<Renderer | null>(null);
   const instrumentRef = useRef<Instrument | null>(null);
   const onReadoutRef = useRef(onReadout);
   onReadoutRef.current = onReadout;
 
-  const { root, lowOctave, octaves, scale, guides, reduced } = settings;
+  const { root, lowOctave, octaves, scale, guides, reduced, chordSnap, snapDelay } = settings;
   const layout = useMemo(() => buildLayout(root, lowOctave, octaves, scale), [root, lowOctave, octaves, scale]);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
     const renderer = new Renderer(canvas, () => engine.getLevel());
-    const instrument = new Instrument(canvas, engine, renderer, (m, b) => onReadoutRef.current(m, b));
+    const instrument = new Instrument(canvas, engine, renderer, chords, (m, b) => onReadoutRef.current(m, b));
     rendererRef.current = renderer;
     instrumentRef.current = instrument;
     renderer.start();
@@ -38,7 +39,11 @@ export function PlayingSurface({ engine, settings, onReadout, rotated }: Props) 
       rendererRef.current = null;
       instrumentRef.current = null;
     };
-  }, [engine]);
+  }, [engine, chords]);
+
+  useEffect(() => {
+    instrumentRef.current?.setSnap(chordSnap, snapDelay);
+  }, [chordSnap, snapDelay]);
 
   useEffect(() => {
     instrumentRef.current?.setLayout(layout);
