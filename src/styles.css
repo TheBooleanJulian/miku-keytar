@@ -1,0 +1,344 @@
+:root {
+  --void: #050508;
+  --surface: #0a0e14;
+  --teal: #00d4c8;
+  --cyan: #38e8ff;
+  --gold: #f5c842;
+  --text: #d8f6f4;
+  --muted: #7fa3a1;
+  --line: rgba(0, 212, 200, 0.28);
+  --sans: "Space Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--void);
+  color: var(--text);
+  font-family: var(--sans);
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mono {
+  font-family: var(--mono);
+}
+
+.app {
+  position: fixed;
+  inset: 0;
+  height: 100dvh;
+}
+
+.surface {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: var(--void);
+  touch-action: none;
+  cursor: crosshair;
+}
+
+/* ---- top bar: sits over the surface, but only its buttons take pointer events ---- */
+.topbar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 40; /* above the landscape side panel so Mute / Stop all stay reachable */
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: calc(env(safe-area-inset-top) + 8px) calc(env(safe-area-inset-right) + 10px) 8px
+    calc(env(safe-area-inset-left) + 12px);
+  pointer-events: none;
+}
+
+.topbar > * {
+  pointer-events: auto;
+}
+
+.brand {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--teal);
+  pointer-events: none;
+}
+
+.actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* ---- buttons ---- */
+.btn {
+  font: 500 13px/1 var(--sans);
+  color: var(--text);
+  background: rgba(10, 14, 20, 0.82);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  min-height: 40px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.btn:hover {
+  border-color: var(--teal);
+}
+
+.btn:focus-visible,
+.toggle:focus-visible,
+.seg button:focus-visible,
+select:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+.btn[aria-expanded="true"] {
+  border-color: var(--teal);
+  color: var(--teal);
+}
+
+.btn.warn {
+  color: var(--gold);
+  border-color: var(--gold);
+}
+
+.btn.danger:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.btn.primary {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: var(--void);
+  font-weight: 700;
+}
+
+.btn.big {
+  font-size: 17px;
+  padding: 16px 28px;
+  min-height: 52px;
+}
+
+/* ---- start / resume overlay ---- */
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  text-align: center;
+  background: rgba(5, 5, 8, 0.82);
+}
+
+.overlay h1 {
+  margin: 0;
+  font-size: clamp(28px, 7vw, 48px);
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+
+.overlay p {
+  margin: 0;
+  max-width: 34ch;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.overlay .error {
+  color: var(--gold);
+}
+
+/* ---- control panel ---- */
+.panel {
+  position: absolute;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: 55dvh;
+  overflow-y: auto;
+  touch-action: pan-y;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px calc(env(safe-area-inset-right) + 16px) calc(env(safe-area-inset-bottom) + 16px)
+    calc(env(safe-area-inset-left) + 16px);
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+}
+
+@media (orientation: landscape) {
+  .panel {
+    left: auto;
+    top: 0;
+    width: min(340px, 45vw);
+    max-height: none;
+    padding-top: calc(env(safe-area-inset-top) + 60px);
+    border-top: 0;
+    border-left: 1px solid var(--line);
+  }
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--teal);
+}
+
+.readout {
+  display: block;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--cyan);
+  background: var(--void);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+select {
+  font: 14px var(--sans);
+  color: var(--text);
+  background: var(--void);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px;
+  min-height: 40px;
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--teal);
+  min-height: 32px;
+}
+
+.seg {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.seg button {
+  flex: 1;
+  font: 500 13px var(--sans);
+  color: var(--text);
+  background: var(--void);
+  border: 0;
+  border-right: 1px solid var(--line);
+  padding: 11px 6px;
+  min-height: 40px;
+  cursor: pointer;
+}
+
+.seg button:last-child {
+  border-right: 0;
+}
+
+.seg button.on {
+  background: var(--teal);
+  color: var(--void);
+  font-weight: 700;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font: 13px var(--sans);
+  color: var(--text);
+  background: var(--void);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  min-height: 40px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.toggle i {
+  position: relative;
+  flex: none;
+  width: 30px;
+  height: 16px;
+  border-radius: 8px;
+  background: #1a2330;
+}
+
+.toggle i::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: transform 0.12s;
+}
+
+.toggle[aria-checked="true"] i {
+  background: rgba(0, 212, 200, 0.35);
+}
+
+.toggle[aria-checked="true"] i::after {
+  background: var(--teal);
+  transform: translateX(14px);
+}
+
+.row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toggle i::after {
+    transition: none;
+  }
+}
