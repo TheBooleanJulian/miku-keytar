@@ -33,7 +33,7 @@ export function defaultSettings(): Settings {
     lowOctave: 3,
     octaves: 2,
     glide: false,
-    preset: "pure",
+    preset: "square",
     effects: true,
     modulation: false,
     guides: true,

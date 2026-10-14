@@ -58,6 +58,9 @@ function setup() {
     createGain: fakeNode,
     createBiquadFilter: fakeNode,
     createDelay: fakeNode,
+    createConvolver: fakeNode,
+    sampleRate: 8000,
+    createBuffer: (_ch: number, len: number) => ({ getChannelData: () => new Float32Array(len) }),
     createDynamicsCompressor: fakeNode,
     createAnalyser: () => Object.assign(fakeNode(), { fftSize: 256 }),
     createOscillator: () => {
@@ -75,7 +78,7 @@ function setup() {
   return { ctx, engine, oscs };
 }
 
-const voiceOscs = (oscs: FakeNode[]) => oscs.slice(1); // index 0 is the shared LFO
+const voiceOscs = (oscs: FakeNode[]) => oscs.slice(2); // first two are the shared chorus and vibrato LFOs
 
 test("init moves idle -> running and notifies listeners", async () => {
   const { engine } = setup();
@@ -99,7 +102,7 @@ test("four simultaneous voices, each released independently with no orphans", as
   await engine.init();
   for (let id = 1; id <= 4; id++) engine.noteOn(id, 60 + id, 0.5);
   assert.equal(engine.activeVoiceCount, 4);
-  assert.equal(voiceOscs(oscs).length, 12); // 3 oscillators per voice
+  assert.equal(voiceOscs(oscs).length, 16); // 4 oscillators per voice
   engine.noteOff(2);
   assert.equal(engine.activeVoiceCount, 3);
   for (const id of [1, 3, 4]) engine.noteOff(id);
@@ -113,7 +116,7 @@ test("a repeated down on the same id releases the previous voice", async () => {
   engine.noteOn(7, 60, 0.5);
   engine.noteOn(7, 62, 0.5);
   assert.equal(engine.activeVoiceCount, 1);
-  assert.ok(voiceOscs(oscs).slice(0, 3).every((o) => o.stopCalls >= 1));
+  assert.ok(voiceOscs(oscs).slice(0, 4).every((o) => o.stopCalls >= 1));
 });
 
 test("stopAll silences everything, including releasing voices, and notifies", async () => {

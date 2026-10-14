@@ -57,12 +57,19 @@ sawtooth ─┘                                                         ├─ v
 - **Envelope:** attack/release use `setTargetAtTime` exponential approaches, never hard jumps, so starting, moving
   and releasing a note produces no clicks. Oscillators are stopped only after the release has decayed to silence,
   then disconnected (`onended`), so no voices are orphaned.
-- **Presets** (all real-time): *Pure* (sine+triangle, soft), *Digital* (saw-heavy, resonant, bright), *Ethereal* (slow
+- **Presets** (all real-time): *Square lead* (default: square + sine, 10 ms attack, 160 ms release, light chorus and
+  short reverb), *Pure* (sine+triangle, soft), *Digital* (saw-heavy, resonant, bright), *Ethereal* (slow
   attack, long release, more echo). Switching presets updates notes that are already sounding.
-- **Effects:** a single feedback echo (delay + low-passed feedback). **Vibrato:** one shared LFO (5.5 Hz, ±14 cents), off by default.
+- **Effects** (one toggle): feedback echo, a light two-tap chorus, and a short convolution reverb whose impulse
+  response is synthesised from decaying noise at startup (no sample files). Each preset sets its own send levels. **Vibrato:** one shared LFO (5.5 Hz, ±14 cents), off by default.
 - **Limits:** up to 10 simultaneous voices (oldest is stolen). A compressor prevents clipping when stacking notes.
 - **Stop All** fades every voice (including ones already releasing) in ~40 ms. The page being hidden or the window
   losing focus also stops all voices.
+
+### Touch visuals
+
+Every touch spawns a cyan line through the touched point at a random angle. If the touch is held longer than 220 ms
+(a rapid tap is shorter), expanding, rotating cyan squares ripple out from the finger until release, then fade.
 
 ### Structure
 

@@ -31,12 +31,14 @@ interface Graph {
   master: GainNode;
   mute: GainNode;
   wet: GainNode;
+  chorusWet: GainNode;
+  reverbWet: GainNode;
   lfoGain: GainNode;
   analyser: AnalyserNode;
 }
 
-const OSC_TYPES: OscillatorType[] = ["sine", "triangle", "sawtooth"];
-const DETUNE_SIGN = [0, 1, -1];
+const OSC_TYPES: OscillatorType[] = ["sine", "triangle", "sawtooth", "square"];
+const DETUNE_SIGN = [0, 1, -1, 0];
 const VOICE_PEAK = 0.22;
 const MAX_VOICES = 10;
 const PITCH_TC_SNAP = 0.005; // seconds: short enough to feel instant, long enough to avoid a click
@@ -60,7 +62,7 @@ export class AudioEngine {
   private settings: EngineSettings = {
     volume: 0.7,
     muted: false,
-    preset: "pure",
+    preset: "square",
     effects: true,
     modulation: false,
     glide: false,
@@ -297,6 +299,37 @@ export class AudioEngine {
     feedback.gain.value = 0.38;
     const wet = ctx.createGain();
     wet.gain.value = 0;
+    // Light chorus: two short delays swept in opposite directions by a slow LFO.
+    const chorusWet = ctx.createGain();
+    chorusWet.gain.value = 0;
+    const chorusLfo = ctx.createOscillator();
+    chorusLfo.frequency.value = 0.7;
+    [0.019, 0.027].forEach((time, i) => {
+      const d = ctx.createDelay(0.1);
+      d.delayTime.value = time;
+      const depth = ctx.createGain();
+      depth.gain.value = i === 0 ? 0.003 : -0.003;
+      chorusLfo.connect(depth);
+      depth.connect(d.delayTime);
+      voiceBus.connect(d);
+      d.connect(chorusWet);
+    });
+    chorusLfo.start();
+
+    // Short reverb: convolution with a synthesised decaying-noise impulse (no sample files).
+    const reverb = ctx.createConvolver();
+    const irLen = Math.round(ctx.sampleRate * 1.1);
+    const ir = ctx.createBuffer(2, irLen, ctx.sampleRate);
+    for (let ch = 0; ch < 2; ch++) {
+      const data = ir.getChannelData(ch);
+      for (let i = 0; i < irLen; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / irLen, 3);
+    }
+    reverb.buffer = ir;
+    const reverbWet = ctx.createGain();
+    reverbWet.gain.value = 0;
+    voiceBus.connect(reverb);
+    reverb.connect(reverbWet);
+
     const comp = ctx.createDynamicsCompressor();
     comp.threshold.value = -14;
     comp.knee.value = 20;
@@ -316,6 +349,8 @@ export class AudioEngine {
     feedback.connect(delay);
     delay.connect(wet);
     wet.connect(comp);
+    chorusWet.connect(comp);
+    reverbWet.connect(comp);
     comp.connect(master);
     master.connect(mute);
     mute.connect(analyser);
@@ -329,7 +364,7 @@ export class AudioEngine {
     lfo.connect(lfoGain);
     lfo.start();
 
-    this.graph = { voiceBus, master, mute, wet, lfoGain, analyser };
+    this.graph = { voiceBus, master, mute, wet, chorusWet, reverbWet, lfoGain, analyser };
     ctx.onstatechange = () => this.emitState();
     if (typeof document !== "undefined") document.addEventListener("visibilitychange", this.onVisibility);
     this.applyGlobal();
@@ -345,6 +380,8 @@ export class AudioEngine {
     g.master.gain.setTargetAtTime(s.volume * s.volume, now, PARAM_TC); // squared: closer to perceived loudness
     g.mute.gain.setTargetAtTime(s.muted ? 0 : 1, now, PARAM_TC);
     g.wet.gain.setTargetAtTime(s.effects ? p.wet : 0, now, 0.05);
+    g.chorusWet.gain.setTargetAtTime(s.effects ? p.chorus : 0, now, 0.05);
+    g.reverbWet.gain.setTargetAtTime(s.effects ? p.reverb : 0, now, 0.05);
     g.lfoGain.gain.setTargetAtTime(s.modulation ? VIBRATO_CENTS : 0, now, 0.1);
     // Preset switches apply to notes that are already sounding.
     for (const v of this.voices.values()) {

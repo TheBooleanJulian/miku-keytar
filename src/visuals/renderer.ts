@@ -9,9 +9,29 @@ const PALETTE = ["#00D4C8", "#38E8FF", "#7CF7EA", "#22B8E0", "#9AF5FF", "#4FD1C5
 const BG = "#050508";
 const MONO = '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
 
+const CYAN = "#22E8FF";
+const HOLD_MS = 220; // pressed at least this long = a hold (shows ripples), shorter = a tap (line only)
+const FLASH_MS = 600;
+const RING_PERIOD = 1300;
+const RING_COUNT = 4;
+const RIPPLE_FADE_MS = 350;
+
+/** Cyan line through the touch point at a random angle, spawned on every touch. */
+class Flash {
+  active = false;
+  x = 0;
+  y = 0;
+  angle = 0;
+  t0 = 0;
+}
+
 class Trail {
   id = -1;
   active = false;
+  downT = 0; // when the touch began
+  endT = 0; // when it ended (0 while held)
+  rot = 0; // random starting rotation for the hold ripples
+
   color = 0;
   count = 0;
   head = 0; // next write index
@@ -61,6 +81,8 @@ export class Renderer {
   private gridCtx: CanvasRenderingContext2D;
   private sprites = PALETTE.map(makeSprite);
   private trails: Trail[] = Array.from({ length: MAX_TRAILS }, () => new Trail());
+  private flashes: Flash[] = Array.from({ length: 12 }, () => new Flash());
+  private flashCursor = 0;
   private colorCursor = 0;
   private layout: PitchLayout | null = null;
   private guides = true;
@@ -122,6 +144,15 @@ export class Renderer {
     const tr = slot ?? oldest;
     tr.id = id;
     tr.active = true;
+    tr.downT = now;
+    tr.endT = 0;
+    tr.rot = Math.random() * Math.PI;
+    const f = this.flashes[this.flashCursor++ % this.flashes.length];
+    f.active = true;
+    f.x = x;
+    f.y = y;
+    f.angle = Math.random() * Math.PI;
+    f.t0 = now;
     tr.count = 0;
     tr.head = 0;
     tr.color = this.colorCursor++ % PALETTE.length;
@@ -149,11 +180,17 @@ export class Renderer {
 
   endTrail(id: number): void {
     const tr = this.find(id);
-    if (tr) tr.active = false; // points keep fading out on their own
+    if (tr) this.release(tr, performance.now()); // points keep fading out on their own
   }
 
   endAll(): void {
-    for (const t of this.trails) t.active = false;
+    const now = performance.now();
+    for (const t of this.trails) if (t.active) this.release(t, now);
+  }
+
+  private release(t: Trail, now: number): void {
+    t.active = false;
+    t.endT = now;
   }
 
   private find(id: number): Trail | null {
@@ -253,6 +290,14 @@ export class Renderer {
         this.dirty = true; // one last redraw to clear it
       }
     }
+    for (const f of this.flashes) {
+      if (!f.active) continue;
+      if (now - f.t0 < FLASH_MS) anyAlive = true;
+      else {
+        f.active = false;
+        this.dirty = true;
+      }
+    }
     if (!anyAlive && !this.dirty) return;
     this.dirty = false;
 
@@ -280,6 +325,9 @@ export class Renderer {
     c.globalCompositeOperation = "lighter";
     c.lineCap = "round";
     c.lineJoin = "round";
+    c.strokeStyle = CYAN;
+    for (const f of this.flashes) if (f.active) this.drawFlash(f, now);
+    for (const t of this.trails) if (t.count > 0) this.drawRipples(t, now);
     for (const t of this.trails) if (t.count > 0) this.drawTrail(t, now, life, pulse);
     c.globalCompositeOperation = "source-over";
 
@@ -294,6 +342,64 @@ export class Renderer {
       }
     }
   };
+
+  private drawFlash(f: Flash, now: number): void {
+    const c = this.ctx;
+    const age = now - f.t0;
+    const grow = Math.min(age / 160, 1);
+    const half = 30 + 110 * (1 - (1 - grow) * (1 - grow) * (1 - grow));
+    const a = 1 - age / FLASH_MS;
+    const dx = Math.cos(f.angle) * half;
+    const dy = Math.sin(f.angle) * half;
+    c.beginPath();
+    c.moveTo(f.x - dx, f.y - dy);
+    c.lineTo(f.x + dx, f.y + dy);
+    if (!this.reduced) {
+      c.lineWidth = 7;
+      c.globalAlpha = 0.18 * a;
+      c.stroke();
+    }
+    c.lineWidth = 1.6;
+    c.globalAlpha = 0.95 * a;
+    c.stroke();
+    c.globalAlpha = 1;
+  }
+
+  /** Expanding, rotating cyan squares emitted while a touch is held past HOLD_MS. */
+  private drawRipples(t: Trail, now: number): void {
+    const end = t.active ? now : t.endT;
+    if (end - t.downT < HOLD_MS) return;
+    const fade = t.active ? 1 : 1 - (now - t.endT) / RIPPLE_FADE_MS;
+    if (fade <= 0) return;
+    const c = this.ctx;
+    const last = (t.head - 1 + MAX_POINTS) % MAX_POINTS;
+    const x = t.xs[last] * this.dpr;
+    const y = t.ys[last] * this.dpr;
+    const rings = this.reduced ? 2 : RING_COUNT;
+    const elapsed = now - t.downT - HOLD_MS;
+    for (let k = 0; k < rings; k++) {
+      const age = elapsed - (k * RING_PERIOD) / rings;
+      if (age < 0) continue;
+      const phase = (age % RING_PERIOD) / RING_PERIOD;
+      let size = 24 + phase * 150;
+      if (!this.reduced) size *= 1 + 0.05 * Math.sin(age / 90); // ripple wobble
+      const rot = t.rot + age * 0.0012 + phase * 1.2;
+      const a = (1 - phase) * fade * Math.min(1, age / 120);
+      const cos = Math.cos(rot) * this.dpr;
+      const sin = Math.sin(rot) * this.dpr;
+      c.setTransform(cos, sin, -sin, cos, x, y);
+      if (!this.reduced) {
+        c.lineWidth = 5;
+        c.globalAlpha = 0.15 * a;
+        c.strokeRect(-size / 2, -size / 2, size, size);
+      }
+      c.lineWidth = 1.5;
+      c.globalAlpha = 0.9 * a;
+      c.strokeRect(-size / 2, -size / 2, size, size);
+    }
+    c.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    c.globalAlpha = 1;
+  }
 
   private drawTrail(t: Trail, now: number, life: number, pulse: number): void {
     const c = this.ctx;
