@@ -144,6 +144,17 @@ body {
   touch-action: manipulation;
 }
 
+.btn.tap {
+  min-height: 52px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.btn.tap:active {
+  background: rgba(0, 212, 200, 0.28);
+  border-color: var(--teal);
+}
+
 .btn.icon {
   display: grid;
   place-items: center;

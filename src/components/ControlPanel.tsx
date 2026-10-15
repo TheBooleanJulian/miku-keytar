@@ -1,5 +1,6 @@
-import type { ReactNode, RefObject } from "react";
+import { useRef, type ReactNode, type RefObject } from "react";
 import { PATTERNS } from "../audio/patterns.ts";
+import { TapTempo } from "../audio/taptempo.ts";
 import { NOTE_NAMES, SCALES, type ScaleId } from "../audio/pitchmap.ts";
 import { PRESETS, type PresetId } from "../audio/presets.ts";
 import type { Layer } from "../audio/rhythm.ts";
@@ -72,6 +73,7 @@ const LAYER_LABELS: [Layer, string][] = [
 ];
 
 export function ControlPanel({ settings: s, update, onStopAll, onClose, readoutRef, fullscreen }: Props) {
+  const tapTempo = useRef(new TapTempo());
   return (
     <section className="panel" aria-label="Controls">
       <header className="panel-head">
@@ -263,6 +265,25 @@ export function ControlPanel({ settings: s, update, onStopAll, onClose, readoutR
             onChange={(e) => update({ bpm: Number(e.target.value) })}
           />
         </label>
+        <button
+          type="button"
+          className="btn tap"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            const bpm = tapTempo.current.tap(e.timeStamp);
+            if (bpm !== null) update({ bpm });
+          }}
+          onKeyDown={(e) => {
+            if ((e.key === "Enter" || e.key === " ") && !e.repeat) {
+              e.preventDefault();
+              const bpm = tapTempo.current.tap(e.timeStamp);
+              if (bpm !== null) update({ bpm });
+            }
+          }}
+        >
+          Tap tempo
+        </button>
+        <p className="hint">Tap at least twice in time. A pause of 2 seconds starts over.</p>
         <label className="field">
           <span>Rhythm volume</span>
           <input
