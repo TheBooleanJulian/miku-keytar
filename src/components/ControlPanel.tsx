@@ -11,6 +11,7 @@ interface Props {
   update: (patch: Partial<Settings>) => void;
   onStopAll: () => void;
   onClose: () => void;
+  onOpenTuner: () => void;
   readoutRef: RefObject<HTMLOutputElement | null>;
   fullscreen: { supported: boolean; active: boolean; toggle: () => void };
 }
@@ -72,7 +73,7 @@ const LAYER_LABELS: [Layer, string][] = [
   ["arp", "Arp pluck"],
 ];
 
-export function ControlPanel({ settings: s, update, onStopAll, onClose, readoutRef, fullscreen }: Props) {
+export function ControlPanel({ settings: s, update, onStopAll, onClose, onOpenTuner, readoutRef, fullscreen }: Props) {
   const tapTempo = useRef(new TapTempo());
   return (
     <section className="panel" aria-label="Controls">
@@ -98,6 +99,37 @@ export function ControlPanel({ settings: s, update, onStopAll, onClose, readoutR
           onChange={(e) => update({ volume: Number(e.target.value) })}
         />
       </label>
+
+      <Group title="INSTRUMENT" open>
+        <Segmented
+          label="Instrument"
+          value={s.instrument}
+          options={[
+            { value: "lead", label: "Keytar lead" },
+            { value: "vocal", label: "Vocal (formant)" },
+          ]}
+          onChange={(instrument) => update({ instrument })}
+        />
+        {s.instrument === "vocal" && (
+          <Segmented
+            label="Vertical axis"
+            value={s.vocalAxis}
+            options={[
+              { value: "morph", label: "Vowel morph" },
+              { value: "fixed", label: "Fixed vowel + brightness" },
+            ]}
+            onChange={(vocalAxis) => update({ vocalAxis })}
+          />
+        )}
+        <button type="button" className="btn" onClick={onOpenTuner}>
+          Open vocal tuner
+        </button>
+        <p className="hint">
+          {s.instrument === "vocal"
+            ? "Left–right is pitch. Up–down morphs the vowel (or brightens a fixed vowel)."
+            : "The vocal engine is a synthetic, vowel-only voice. Switch to it to play sustained vowels."}
+        </p>
+      </Group>
 
       <Group title="SCALE & SOUND" open>
         <div className="grid">
@@ -154,7 +186,7 @@ export function ControlPanel({ settings: s, update, onStopAll, onClose, readoutR
         />
 
         <div className="field">
-          <span>Sound</span>
+          <span>Lead sound</span>
           <div className="seg" role="radiogroup" aria-label="Sound preset">
             {(Object.keys(PRESETS) as PresetId[]).map((id) => (
               <button

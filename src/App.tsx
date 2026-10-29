@@ -2,11 +2,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { diatonicChords } from "./audio/chords.ts";
 import { AudioEngine, type EngineState } from "./audio/engine.ts";
 import { midiToName } from "./audio/pitchmap.ts";
+import { ReferencePlayer } from "./audio/reference.ts";
 import { ChordBar } from "./components/ChordBar.tsx";
 import { ControlPanel } from "./components/ControlPanel.tsx";
 import { Harmony, type HarmonyState } from "./harmony.ts";
 import { PlayingSurface } from "./components/PlayingSurface.tsx";
+import { TunerPanel } from "./components/TunerPanel.tsx";
 import { loadSettings, saveSettings, type Settings } from "./settings.ts";
+import {
+  USER_PREFIX,
+  cleanName,
+  deleteUserPreset,
+  loadUserPresets,
+  resolvePreset,
+  saveUserPreset,
+} from "./vocalStore.ts";
+
+type PanelId = "settings" | "tuner" | null;
 
 type FsDocument = Document & { webkitFullscreenEnabled?: boolean; webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => void };
 type FsElement = HTMLElement & { webkitRequestFullscreen?: () => void };
@@ -69,6 +81,18 @@ function MetronomeIcon() {
   );
 }
 
+/** Three vertical sliders: the vocal tuner. */
+function TunerIcon() {
+  return (
+    <svg {...iconProps}>
+      <path d="M6 4v16M12 4v16M18 4v16" />
+      <circle cx="6" cy="9" r="2" fill="currentColor" />
+      <circle cx="12" cy="15" r="2" fill="currentColor" />
+      <circle cx="18" cy="8" r="2" fill="currentColor" />
+    </svg>
+  );
+}
+
 /** Ring with eight teeth. */
 function GearIcon() {
   const teeth = Array.from({ length: 8 }, (_, i) => {
@@ -111,20 +135,31 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(loadSettings);
   const [audio, setAudio] = useState<EngineState>("idle");
   const [error, setError] = useState<string | null>(null);
-  const [panelOpen, setPanelOpen] = useState(false);
+  const [panel, setPanel] = useState<PanelId>(null);
+  const [users, setUsers] = useState(loadUserPresets);
   const readoutRef = useRef<HTMLOutputElement>(null);
+  const yRef = useRef(0.5); // latest vertical touch position, read by the tuner's spectrum markers
   const fullscreen = useFullscreen();
+  const referenceRef = useRef<ReferencePlayer | null>(null);
+  if (!referenceRef.current) referenceRef.current = new ReferencePlayer(() => engine.referenceTarget());
+  const reference = referenceRef.current;
 
   useEffect(() => {
     const off = engine.onState(setAudio);
     const offChords = harmony.onChange(setChordUi);
+    const offStop = engine.onAllStopped(() => reference.stop());
     return () => {
       off();
       offChords();
+      offStop();
+      reference.dispose();
       harmony.dispose();
       engine.dispose();
     };
-  }, [engine, harmony]);
+  }, [engine, harmony, reference]);
+
+  // Developer hook for measuring levels from the dev server; stripped from production builds.
+  if (import.meta.env.DEV) (window as unknown as Record<string, unknown>).__keytar = { engine, harmony };
 
   const { keyRoot, keyMode, sevenths, chordMode, pattern, bpm, layers } = settings;
   useEffect(() => {
@@ -132,21 +167,39 @@ export default function App() {
   }, [harmony, keyRoot, keyMode, sevenths, chordMode, pattern, bpm, layers]);
   const chords = useMemo(() => diatonicChords(keyRoot, keyMode, sevenths), [keyRoot, keyMode, sevenths]);
 
+  // A/B: "default" plays the untouched preset, "edited" plays the tuner's working copy.
+  const { vocalCompare, vocalPreset, vocal } = settings;
+  const effectiveVocal = useMemo(
+    () => (vocalCompare === "default" ? resolvePreset(vocalPreset, users) : vocal),
+    [vocalCompare, vocalPreset, vocal, users],
+  );
   useEffect(() => {
-    engine.configure(settings);
+    engine.configure({ ...settings, vocal: effectiveVocal });
     saveSettings(settings);
-  }, [engine, settings]);
+  }, [engine, settings, effectiveVocal]);
 
   const update = useCallback((patch: Partial<Settings>) => setSettings((s) => ({ ...s, ...patch })), []);
 
-  const settingsRef = useRef(settings);
-  settingsRef.current = settings;
+  const saveUser = useCallback(
+    (name: string) => {
+      const clean = cleanName(name);
+      const next = saveUserPreset(users, clean, settings.vocal);
+      if (!next) return false;
+      setUsers(next);
+      update({ vocalPreset: USER_PREFIX + clean });
+      return true;
+    },
+    [users, settings.vocal, update],
+  );
+  const deleteUser = useCallback((name: string) => setUsers((u) => deleteUserPreset(u, name)), []);
+
   // Called at most once per frame by the pointer controller; writes straight to the DOM, no React render.
   const onReadout = useCallback(
-    (midi: number, brightness: number) => {
+    (midi: number, y: number) => {
+      yRef.current = y;
       const el = readoutRef.current;
       if (!el) return;
-      el.textContent = `${midiToName(midi)} · brightness ${Math.round(brightness * 100)}% · ${Math.round(engine.cutoffFor(brightness))} Hz`;
+      el.textContent = `${midiToName(midi)} · ${engine.controlLabel(y)}`;
     },
     [engine],
   );
@@ -230,27 +283,54 @@ export default function App() {
           >
             <SoundIcon on={!settings.muted} />
           </button>
+          {settings.instrument === "vocal" && (
+            <button
+              type="button"
+              className="btn icon"
+              aria-expanded={panel === "tuner"}
+              aria-label="Vocal tuner"
+              title="Vocal tuner"
+              onClick={() => setPanel((p) => (p === "tuner" ? null : "tuner"))}
+            >
+              <TunerIcon />
+            </button>
+          )}
           <button
             type="button"
             className="btn icon"
-            aria-expanded={panelOpen}
+            aria-expanded={panel === "settings"}
             aria-label="Settings"
             title="Settings"
-            onClick={() => setPanelOpen((o) => !o)}
+            onClick={() => setPanel((p) => (p === "settings" ? null : "settings"))}
           >
             <GearIcon />
           </button>
         </div>
       </div>
 
-      {panelOpen && (
+      {panel === "settings" && (
         <ControlPanel
           settings={settings}
           update={update}
           onStopAll={() => engine.stopAll()}
-          onClose={() => setPanelOpen(false)}
+          onClose={() => setPanel(null)}
+          onOpenTuner={() => setPanel("tuner")}
           readoutRef={readoutRef}
           fullscreen={fullscreen}
+        />
+      )}
+
+      {panel === "tuner" && (
+        <TunerPanel
+          engine={engine}
+          reference={reference}
+          settings={settings}
+          update={update}
+          users={users}
+          onSaveUser={saveUser}
+          onDeleteUser={deleteUser}
+          yRef={yRef}
+          onClose={() => setPanel(null)}
         />
       )}
     </div>

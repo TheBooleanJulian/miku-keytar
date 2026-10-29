@@ -71,6 +71,138 @@ sawtooth ─┘                                                         ├─ v
 Every touch spawns a cyan line through the touched point at a random angle. If the touch is held longer than 220 ms
 (a rapid tap is shorter), expanding, rotating cyan squares ripple out from the finger until release, then fade.
 
+### Vocal mode (formant synthesis)
+
+An optional, Miku-*inspired* synthetic voice. **It is not a Hatsune Miku voicebank and does not reproduce her voice.**
+The aim is a bright, youthful, slightly nasal, electronically clean vowel sound that you can shape by ear.
+
+**Enable it:** Settings → *Instrument* → **Vocal (formant)**. The *Keytar lead* stays the default and is untouched:
+its presets, mappings and effects do not change, and notes already sounding keep their instrument when you switch.
+A tuner icon then appears in the top bar (also: Settings → *Open vocal tuner*).
+
+#### How formant synthesis works
+
+A voice is a **source** shaped by a **filter**. Here the source is a pulse train (the "vocal folds"), optionally mixed with
+sawtooth, sine and a little filtered noise (breath). The filter is the vocal tract: a bank of five resonant band-pass
+filters at the **formant** frequencies. Which vowel you hear depends on where those resonances sit (mainly F1 and F2),
+*not* on the pitch, so pitch and vowel are separate controls and can be changed independently.
+
+```
+pulse (band-limited wave, adjustable width) --+
+sawtooth -------------------------------------+-> brightness low-pass --+
+sine -----------------------------------------+                        +--> 5 parallel band-pass filters (F1-F5)
+looped noise -> high-pass -> breath ---------------------------------------+        |
+                                                                                    v
+                                              per-voice vibrato + drift -> pitch    envelope -> shared chorus / reverb -> out
+```
+
+Every voice has its own oscillators, filters, envelope, vibrato and slow pitch drift, so held notes are independent.
+Parameter changes use short exponential smoothing and the pulse is a band-limited `PeriodicWave`, so moving a slider
+or a finger does not click or alias. Everything is synthesised in the browser; there are no audio files.
+
+#### Pitch and vowel mapping
+
+- **Horizontal:** pitch, exactly as in the lead (same scales, snapping, glide, chord snapping and multi-touch).
+- **Vertical, "Vowel morph" (default):** a continuous morph through the five Japanese vowels. Bottom to top is
+  **う → お → あ → え → い**, an order in which neighbours are acoustically close (the second formant rises from う to い),
+  so the whole range is a smooth slide. Frequencies and bandwidths interpolate geometrically; gains linearly.
+- **Vertical, "Fixed vowel + brightness":** the vowel is whatever you choose in the tuner (あ い う え お buttons or the
+  morph slider), and the vertical axis nudges brightness (±0.4 around the panel value), like the lead's brightness axis.
+- Chord buttons use the same voice at a lower level (in morph mode they sing あ).
+
+#### Controls (Vocal Tuner)
+
+| Control | What it does |
+|---|---|
+| **Compare A/B/C** | A: the original keytar lead. B: the selected vocal preset, untouched. C: your edited vocal. One tap switches while you play. |
+| **Preset** | Miku-inspired (ref fit, the default), Bright Vocal, Soft Vocal, Electronic Vocal, plus your saved presets. Selecting one loads it into the editor. |
+| **Vowel / Vowel morph** | Panel vowel position. Used as the sung vowel in fixed mode and for the spectrum markers. |
+| **Audition note** | The note the *Hold to audition* button sounds, so you can tune without a second hand. |
+| **Formant pitch-tracking** | 0 keeps the formants fixed whatever the pitch (the default stays small). Higher values drift them gently up on high notes and down on low ones, as a stylisation. |
+| **Pulse level / width** | Level of the pulse wave and its duty cycle. 0.5 is a square (odd harmonics only); narrower pulses are brighter and more nasal. |
+| **Sawtooth / Sine level** | Extra harmonics for edge, or body underneath. |
+| **Brightness** | Low-pass cutoff on the excitation (1.5 kHz to 12 kHz, logarithmic). |
+| **Breathiness** | Noise through the same vocal tract, with the periodic source slightly reduced. |
+| **Vibrato rate / depth / onset delay** | Per-voice vibrato (Hz, cents, seconds before it fades in). |
+| **Pitch drift** | Very slow, per-voice random-ish wander in cents: a little life without a wobble. |
+| **Attack / Sustain / Release** | Envelope (sustain is the held level). Short attacks keep notes articulate. |
+| **Chorus / Reverb** | Sends into the shared effects. Bypassed by the Settings *Effects* switch. The vocal has no echo so the timbre stays clear. |
+| **F1-F5 Frequency / Bandwidth / Gain** | Per-resonance multipliers applied to every vowel. The header shows the current Hz and bandwidth for the panel vowel. |
+
+All values are bounded and validated; nothing can be set outside a safe range, and saved or imported data is sanitised.
+
+#### Creating and tuning presets
+
+1. Pick the nearest built-in preset, press **Hold to audition** (or play), and adjust one control at a time.
+2. Use **A/B/C** to compare against the lead and against the untouched preset. Levels are matched automatically
+   (see *Loudness matching*), so the louder one does not win by default.
+3. Type a name and **Save**. Presets are stored in this browser only (`localStorage`, key
+   `miku-keytar:vocal-presets:v1`), separately from the main settings, up to 20 of 24-character names. They never
+   overwrite built-in presets. **Reset edits** returns to the selected preset; **Delete preset** removes a saved one.
+
+Suggested order: vowel and formant gains first (character), then pulse width and brightness (edge), then breathiness,
+vibrato and attack (expression), and chorus/reverb last, since effects can hide problems in the core sound.
+
+#### Reading the spectrum display
+
+- **Teal line/fill:** the measured spectrum of the synthesiser output (before master volume and mute), log frequency
+  from 60 Hz to 10 kHz. The comb of peaks is the harmonics of the note; the *envelope* over those peaks is the vocal tract.
+- **Gold dashed lines F1-F5:** where the engine is *configured* to put the formants right now (following your finger
+  in morph mode). They are targets, not measurements. Peaks in the teal curve should cluster around them, but a formant
+  only boosts the harmonics that happen to be nearby, so a marker can sit between two harmonics with no peak.
+- **Magenta:** the optional reference recording (below).
+- The display refreshes about 30 times a second and stops when the panel closes or the tab is hidden.
+
+#### Reference audio (local)
+
+In the tuner you can choose an audio file you have the right to use and play, pause or stop it next to the synth. It is
+decoded in the browser and **never uploaded**. Its spectrum is drawn in magenta over the synth's. Recordings usually include
+accompaniment, reverb and compression, and a singer's formants move constantly, so **do not treat every peak as a formant**.
+It is a listening and eyeballing aid, not an automatic analyser.
+
+#### Loudness matching
+
+Because a pulse train keeps most of its energy in its fundamental, a note whose pitch lands on a formant is much louder
+than its neighbours (measured: up to 5x between adjacent semitones with fixed gains). Each voice therefore predicts its own
+output level from its harmonic series through its actual filter bank and scales to a fixed target (`vocal/level.ts`).
+Calibrated in Edge against the Square lead: the vocal averaged 1.08x the lead's RMS (about +0.7 dB), with a 1.4x
+(about 3 dB) spread across all five vowels and C3-E5. Wider sung bandwidths (150-320 Hz) also reduce the swing.
+To re-calibrate, run the dev server, measure `engine.getLevel()` via the dev-only `window.__keytar` hook and adjust
+`LEVEL_TARGET`.
+
+#### Matching a reference (how "Miku-inspired (ref fit)" was made)
+
+The default preset was fitted to a 26 s recording of a held あ sung from F3 to F6 (kept locally in `ref/`, which is
+git-ignored; the audio is not in this repository). `tools/reference/` repeats the process on any sustained-note clip
+(see its README). What the clip showed, measured with the engine's own offline render so the numbers describe shipping code:
+
+| Measurement | Reference | Bright Vocal (before) | Change in "ref fit" |
+|---|---|---|---|
+| Vibrato | 3.3 Hz, about ±40 cents, on every note | 5.4 Hz, ±14 cents | 3.3 Hz, ±40 cents (onset delayed 0.45 s) |
+| Energy at 2.5-4 kHz | clear dip | about +14 dB too strong | F3 gain 0.15, F4 0.6, F5 0.5 |
+| Second formant | broad | narrow | bandwidth ×1.49 |
+| Breath / noise | audible | 0.06 | 0.18 |
+| Vowel | あ fits best from F4 up (3.8-9 dB) | - | あ unchanged (F2 scan was flat at ×1.0) |
+
+Result on the notes it was fitted to (F4-C6): harmonic error 7.7 → 5.6 dB, overall distance 10.5 → 7.6 (about 28 % closer).
+**It does not improve the extremes:** on held-out notes (A3 and F6) it is no closer than Bright Vocal. The clip's lowest
+notes are almost a pure fundamental (much softer than any vowel here), and its last two notes are a different voice
+quality (the 2nd harmonic dominates), so a single あ cannot match the whole file. Treat the preset as a starting point to
+tune by ear; it is not a clone of any voicebank.
+
+#### Formant synthesis versus a singing voicebank
+
+A commercial voicebank is built from recordings of a real singer, split into phoneme transitions and re-pitched and
+joined by a trained engine, which is where the realism of consonants, breaths and phrasing comes from. This engine has none
+of that data: it is an original, procedural vowel synthesiser. It can sound convincingly *vowel-like* and *synthetic*,
+and it is fully tunable, but it will not sound like a particular singer.
+
+**Currently implemented:** sustained vowel-like timbres, pitch control, continuous vowel morphing, expression controls.
+**Not implemented (future):** consonants (fricatives, plosives, nasals), phoneme sequencing, lyric entry, note-to-syllable
+alignment, and realistic singing expression (portamento shaping, dynamics, breaths). Vowel morphing alone does **not**
+produce intelligible Japanese lyrics. The engine is split so a phoneme sequencer can reuse it: the pure vowel and formant
+data are in `vocal/formants.ts` and the voice in `vocal/voice.ts` takes a vowel position and pitch, nothing more.
+
 ### Chords
 
 A bar of seven buttons along the bottom plays the **diatonic chords** of the key chosen in Controls → Chords
@@ -112,14 +244,19 @@ a matching shape, no CSS rotation is applied.
 ```
 src/audio/pitchmap.ts   scales, x → note snapping (pure functions)
 src/audio/presets.ts    preset definitions + brightness → cutoff curve
-src/audio/engine.ts     AudioEngine: context, graph, voices, suspend/resume
+src/audio/engine.ts     AudioEngine: context, graph, voices (lead or vocal), suspend/resume, spectrum tap
+src/audio/voice.ts      VoiceHandle interface shared by every instrument
+src/audio/lead.ts       the original keytar lead voice
+src/audio/vocal/        formants.ts (vowels, morph), params.ts (bounds, presets), level.ts (loudness), voice.ts
+src/audio/reference.ts  local reference-audio player
+src/vocalStore.ts       user vocal presets in localStorage
 src/audio/chords.ts     diatonic chords, voicings, nearest chord tone (pure)
 src/audio/patterns.ts   the ten rhythm patterns (data)
 src/audio/rhythm.ts     step sequencer + drum/bass/pad/arp synthesis
 src/harmony.ts          chord state shared by chord bar, melody and rhythm
 src/interaction.ts      Pointer Events → engine + renderer (no React state per move)
 src/visuals/renderer.ts Canvas: grid, trails, glow, pulse (preallocated, rAF loop)
-src/components/         PlayingSurface (canvas host), ControlPanel
+src/components/         PlayingSurface (canvas host), ControlPanel, ChordBar, TunerPanel, SpectrumView
 src/App.tsx             state, start/resume overlay, top bar
 ```
 
@@ -128,7 +265,20 @@ live readout writes to the DOM once per animation frame. The render loop skips d
 
 ## Testing
 
-### Automated (`npm test`, 26 tests)
+### Automated (`npm test`, 85 tests)
+- Vocal formants: five Japanese vowels with ordered, in-range resonances; exact interpolation at every vowel endpoint,
+  geometric midpoints, a continuous 400-step sweep with no jumps; clamping of positions and tweaks; filter Q ceiling;
+  pitch has no effect on formants when tracking is 0.
+- Vocal parameters: three presets within every bound and audibly different; sanitising of NaN, wrong types and
+  out-of-range values; pulse-wave spectrum (square = odd harmonics only, 2/(nπ) amplitudes; narrower = brighter);
+  vertical-axis mapping in morph and fixed modes; pitch and vowel independence.
+- Loudness compensation: finite and positive everywhere, lands on target for every vowel and pitch, scales inversely with
+  formant gain, bounded for hostile settings.
+- Vocal engine (fake `AudioContext`): voice creation and release stop every source; four independent simultaneous notes;
+  Stop All including releasing voices; voice cap; switching lead ⇄ vocal while notes are held leaves nothing orphaned;
+  preset/parameter changes on held notes create no extra oscillators; the lead's brightness → cutoff mapping is unchanged.
+- Settings and presets: legacy settings load unchanged on the lead; invalid vocal fields fall back; user presets persist,
+  are capped, cleaned and sanitised, survive blocked storage, and never touch the built-ins.
 - Chord theory: C major / A minor triads, 7th chords, roman numerals, voicings, nearest-chord-tone search.
 - Rhythm: all ten patterns are well-formed; each schedules a full bar against a fake clock without errors; stop
   halts scheduling; muted layers add nothing; drums-only when no chord is chosen.
@@ -143,8 +293,19 @@ live readout writes to the DOM once per animation frame. The render loop skips d
 - Four simultaneous touches with independent trails, glow and snapped-note columns; moving fingers while held; releasing.
 - Controls panel opens; switching preset while a note is held; live note/brightness/Hz readout.
 - No console errors or warnings.
+- Vocal engine, measured with the engine's own analyser: the five vowels are spectrally distinct (う/お dark with energy only
+  below ~600 Hz, あ open with strong 600-1800 Hz, え/い bright near 2.4/3.4 kHz); a full う→い sweep has no level jumps
+  (largest step ≈ 1.5 dB, i.e. meter noise); loudness is within ±1.5 dB across vowels and pitches and ≈ the lead's level.
+- Vocal UI: instrument switch, vowel readout, tuner with live spectrum and F1-F5 markers, A/B/C slots, preset save and
+  delete with persistence, local reference file load/play/stop.
 
 ### Manual checklist (needs a real device / ears: not verifiable headlessly)
+- [ ] **Vocal timbre by ear:** do the vowels read as あ い う え お? Is Bright Vocal forward and youthful rather than
+      buzzy or nasal-in-a-bad-way? Is Soft smoother, Electronic more synthetic? (All values are starting estimates.)
+- [ ] Vowel morph feels smooth under a moving finger, with no zipper noise; chords under a held melody stay clean.
+- [ ] Switch Lead ⇄ Vocal while holding notes: nothing sticks; Stop All is immediate.
+- [ ] A/B/C loudness feels matched on your speakers and headphones.
+- [ ] Spectrum and the tuner stay smooth on a mid-range phone (the display runs at ~30 fps while open).
 - [ ] Rhythm engine: all ten patterns sound musical; drum/bass/pad/arp balance and tempo feel right; no clicks when
       changing chords or pattern mid-groove. (Mix levels were set conservatively without listening: tune the
       `LAYER_LEVEL` and per-instrument peaks in `rhythm.ts` by ear.)
@@ -169,4 +330,7 @@ live readout writes to the DOM once per animation frame. The render loop skips d
 - **Latency:** depends on device and output (Bluetooth headphones add noticeable delay). `latencyHint: "interactive"` is requested.
 - **System gestures:** iOS edge-swipe/Control Centre gestures can still cancel a touch near the screen edge; cancelled pointers release their notes cleanly.
 - **Offline:** requires the first load over HTTPS (or localhost) so the service worker can install.
+- **Vocal engine:** vowels only (no consonants or lyrics), tuned to estimated values rather than measured ones, and
+  each vocal voice is roughly 25 audio nodes, so very dense playing (many fingers plus all chord notes) costs more CPU
+  than the lead. Reference-file decoding depends on the browser's codecs; very long files are refused above 60 MB.
 - **Hardware limits:** many simultaneous touches are capped by the device (commonly 5–10). Use *Reduced visuals* on slow phones.

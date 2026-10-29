@@ -38,6 +38,7 @@ export function fakeNode(): FakeNode {
     stop() {
       (this as FakeNode).stopCalls++;
     },
+    setPeriodicWave() {},
   };
   // Any other property read is treated as an AudioParam.
   return new Proxy(target, {
@@ -50,6 +51,7 @@ export function fakeNode(): FakeNode {
 
 export function makeFakeContext() {
   const oscs: FakeNode[] = [];
+  const bufferSources: FakeNode[] = [];
   const ctx = {
     state: "suspended",
     currentTime: 0,
@@ -60,10 +62,23 @@ export function makeFakeContext() {
     createBiquadFilter: fakeNode,
     createDelay: fakeNode,
     createConvolver: fakeNode,
-    createBufferSource: fakeNode,
+    createBufferSource: () => {
+      const n = fakeNode();
+      bufferSources.push(n);
+      return n;
+    },
     createBuffer: (_ch: number, len: number) => ({ getChannelData: () => new Float32Array(len) }),
     createDynamicsCompressor: fakeNode,
-    createAnalyser: () => Object.assign(fakeNode(), { fftSize: 256 }),
+    createPeriodicWave: () => ({}),
+    createAnalyser: () =>
+      Object.assign(fakeNode(), {
+        fftSize: 256,
+        frequencyBinCount: 128,
+        minDecibels: -100,
+        maxDecibels: -20,
+        getByteTimeDomainData: (a: Uint8Array) => a.fill(128),
+        getFloatFrequencyData: (a: Float32Array) => a.fill(-90),
+      }),
     createOscillator: () => {
       const o = fakeNode();
       oscs.push(o);
@@ -75,5 +90,5 @@ export function makeFakeContext() {
     },
     async close() {},
   };
-  return { ctx, oscs, asContext: () => ctx as unknown as AudioContext };
+  return { ctx, oscs, bufferSources, asContext: () => ctx as unknown as AudioContext };
 }

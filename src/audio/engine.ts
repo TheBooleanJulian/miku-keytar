@@ -1,13 +1,24 @@
 // Web Audio engine. Knows nothing about React, canvas or pointers.
 //
 // Graph:  voices -> voiceBus -> dry ------------------> compressor -> master -> mute -> speakers
-//                           \-> echo delay -> wet ---/                              \-> analyser
-//         (each voice: 3 oscillators -> mix gains -> low-pass filter -> envelope gain)
+//                           \-> echo delay -> wet ---/         \                    \-> analyser (level)
+//                           \-> chorus -> chorusWet -/          \-> spectrum analyser (tuner display)
+//                           \-> reverb -> reverbWet /
+//         rhythm bus --------------------------------/
+//
+// A voice is anything implementing VoiceHandle: the original lead synth (lead.ts) or the formant vocal
+// (vocal/voice.ts). The engine owns polyphony, release, Stop All and cleanup for both.
 
+import { createLeadVoice } from "./lead.ts";
 import { PRESETS, cutoffHz, type PresetId } from "./presets.ts";
 import { midiToFreq } from "./pitchmap.ts";
+import { PARAM_TC, type VoiceHandle } from "./voice.ts";
+import { vowelLabel } from "./vocal/formants.ts";
+import { defaultVocal, effectiveVowelPos, pulseWaveCoeffs, type VocalAxis, type VocalParams } from "./vocal/params.ts";
+import { createVocalVoice, type VocalSettings, type VocalShared } from "./vocal/voice.ts";
 
 export type EngineState = "idle" | "running" | "suspended" | "error";
+export type Instrument = "lead" | "vocal";
 
 export interface EngineSettings {
   volume: number;
@@ -18,14 +29,11 @@ export interface EngineSettings {
   glide: boolean;
   /** Level of the rhythm section (drums, bass, pad, arp), 0..1. */
   rhythmVolume: number;
-}
-
-interface Voice {
-  oscs: OscillatorNode[];
-  mixes: GainNode[];
-  filter: BiquadFilterNode;
-  env: GainNode;
-  brightness: number;
+  /** Which instrument new notes use. Notes already sounding keep the instrument they started with. */
+  instrument: Instrument;
+  /** Vocal parameters in force (the tuner's A/B choice has already been applied by the caller). */
+  vocal: VocalParams;
+  vocalAxis: VocalAxis;
 }
 
 interface Graph {
@@ -38,15 +46,12 @@ interface Graph {
   rhythmBus: GainNode;
   lfoGain: GainNode;
   analyser: AnalyserNode;
+  spectrum: AnalyserNode;
 }
 
-const OSC_TYPES: OscillatorType[] = ["sine", "triangle", "sawtooth", "square"];
-const DETUNE_SIGN = [0, 1, -1, 0];
-const VOICE_PEAK = 0.22;
 const MAX_VOICES = 16; // touches + held chord notes
 const PITCH_TC_SNAP = 0.005; // seconds: short enough to feel instant, long enough to avoid a click
 const PITCH_TC_GLIDE = 0.07;
-const PARAM_TC = 0.025;
 const VIBRATO_CENTS = 14;
 
 type WebkitWindow = Window & { webkitAudioContext?: typeof AudioContext };
@@ -60,8 +65,8 @@ function defaultContext(): AudioContext {
 export class AudioEngine {
   private ctx: AudioContext | null = null;
   private graph: Graph | null = null;
-  private voices = new Map<number, Voice>();
-  private fading = new Set<Voice>();
+  private voices = new Map<number, VoiceHandle>();
+  private fading = new Set<VoiceHandle>();
   private settings: EngineSettings = {
     volume: 0.7,
     muted: false,
@@ -70,7 +75,14 @@ export class AudioEngine {
     modulation: false,
     glide: false,
     rhythmVolume: 0.7,
+    instrument: "lead",
+    vocal: defaultVocal(),
+    vocalAxis: "morph",
   };
+  /** Stable object read by vocal voices, so no allocation per call. */
+  private vocalSettings: VocalSettings = { params: this.settings.vocal, axis: this.settings.vocalAxis };
+  private vocalShared: VocalShared | null = null;
+  private waves = new Map<number, PeriodicWave>();
   private failed = false;
   private levelBuf: Uint8Array<ArrayBuffer> | null = null;
   private stateListeners = new Set<(s: EngineState) => void>();
@@ -133,6 +145,8 @@ export class AudioEngine {
     }
     this.ctx = null;
     this.graph = null;
+    this.vocalShared = null;
+    this.waves.clear();
     this.stateListeners.clear();
     this.stopListeners.clear();
   }
@@ -152,6 +166,8 @@ export class AudioEngine {
 
   configure(next: EngineSettings): void {
     this.settings = { ...next };
+    this.vocalSettings.params = next.vocal;
+    this.vocalSettings.axis = next.vocalAxis;
     this.applyGlobal();
   }
 
@@ -169,9 +185,45 @@ export class AudioEngine {
     return Math.sqrt(sum / this.levelBuf.length);
   }
 
-  /** Cutoff in Hz for a brightness value under the current preset (for UI readout). */
+  /** Cutoff in Hz for a brightness value under the current lead preset (for the UI readout). */
   cutoffFor(brightness: number): number {
     return cutoffHz(PRESETS[this.settings.preset], brightness);
+  }
+
+  /** Text for the live readout describing what the vertical position does under the current instrument. */
+  controlLabel(y: number): string {
+    const s = this.settings;
+    if (s.instrument === "vocal") {
+      const pos = effectiveVowelPos(s.vocal.vowelPos, y, s.vocalAxis);
+      return `vowel ${vowelLabel(pos)} · ${s.vocalAxis === "morph" ? "morph" : "fixed"} ${Math.round(pos * 100)}%`;
+    }
+    return `brightness ${Math.round(y * 100)}% · ${Math.round(this.cutoffFor(y))} Hz`;
+  }
+
+  // ---- analysis / routing for the tuner and reference player ------------------
+
+  /** Spectrum of the synth output (before master volume and mute). Returns false if audio isn't built yet. */
+  readSpectrum(out: Float32Array<ArrayBuffer>): boolean {
+    const g = this.graph;
+    if (!g || out.length < g.spectrum.frequencyBinCount) return false;
+    g.spectrum.getFloatFrequencyData(out);
+    return true;
+  }
+
+  spectrumInfo(): { bins: number; sampleRate: number; minDb: number; maxDb: number } | null {
+    const g = this.graph;
+    if (!g || !this.ctx) return null;
+    return {
+      bins: g.spectrum.frequencyBinCount,
+      sampleRate: this.ctx.sampleRate,
+      minDb: g.spectrum.minDecibels,
+      maxDb: g.spectrum.maxDecibels,
+    };
+  }
+
+  /** Context and node the reference-audio player plays into (master volume and mute apply). */
+  referenceTarget(): { ctx: AudioContext; out: AudioNode } | null {
+    return this.ctx && this.graph ? { ctx: this.ctx, out: this.graph.master } : null;
   }
 
   // ---- voices ------------------------------------------------------------
@@ -193,40 +245,13 @@ export class AudioEngine {
       if (oldest !== undefined) this.release(oldest, 0.03);
     }
 
-    const p = PRESETS[this.settings.preset];
     const now = ctx.currentTime;
     const freq = midiToFreq(midi);
-
-    const filter = ctx.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.frequency.value = cutoffHz(p, brightness);
-    filter.Q.value = p.q;
-
-    const env = ctx.createGain();
-    env.gain.value = 0;
-    filter.connect(env);
-    env.connect(g.voiceBus);
-
-    const oscs: OscillatorNode[] = [];
-    const mixes: GainNode[] = [];
-    for (let i = 0; i < OSC_TYPES.length; i++) {
-      const osc = ctx.createOscillator();
-      osc.type = OSC_TYPES[i];
-      osc.frequency.value = freq;
-      osc.detune.value = DETUNE_SIGN[i] * p.detune;
-      const mix = ctx.createGain();
-      mix.gain.value = p.mix[i];
-      osc.connect(mix);
-      mix.connect(filter);
-      g.lfoGain.connect(osc.detune);
-      osc.start(now);
-      oscs.push(osc);
-      mixes.push(mix);
-    }
-
-    // setTargetAtTime (not a linear ramp) so a release can start from wherever the attack is.
-    env.gain.setTargetAtTime(VOICE_PEAK * level, now, p.attack / 3);
-    this.voices.set(id, { oscs, mixes, filter, env, brightness });
+    const voice =
+      this.settings.instrument === "vocal" && this.vocalShared
+        ? createVocalVoice(ctx, g.voiceBus, this.vocalShared, this.getVocal, freq, brightness, level, now)
+        : createLeadVoice(ctx, g.voiceBus, g.lfoGain, this.getPreset, freq, brightness, level, now);
+    this.voices.set(id, voice);
   }
 
   noteMove(id: number, midi: number, brightness: number): void {
@@ -234,15 +259,13 @@ export class AudioEngine {
     const v = this.voices.get(id);
     if (!ctx || !v) return;
     const now = ctx.currentTime;
-    const freq = midiToFreq(midi);
-    const tc = this.settings.glide ? PITCH_TC_GLIDE : PITCH_TC_SNAP;
-    for (const osc of v.oscs) osc.frequency.setTargetAtTime(freq, now, tc);
-    v.brightness = brightness;
-    v.filter.frequency.setTargetAtTime(cutoffHz(PRESETS[this.settings.preset], brightness), now, PARAM_TC);
+    v.setPitch(midiToFreq(midi), now, this.settings.glide ? PITCH_TC_GLIDE : PITCH_TC_SNAP);
+    v.setControl(brightness, now);
   }
 
   noteOff(id: number): void {
-    this.release(id, PRESETS[this.settings.preset].release);
+    const v = this.voices.get(id);
+    if (v) this.release(id, v.releaseSeconds());
   }
 
   stopAll(): void {
@@ -252,7 +275,7 @@ export class AudioEngine {
       // Voices already releasing (e.g. long Ethereal tails) get cut short too.
       for (const v of this.fading) {
         v.env.gain.setTargetAtTime(0, now, 0.01);
-        for (const osc of v.oscs) osc.stop(now + 0.1);
+        for (const src of v.sources) src.stop(now + 0.1);
       }
       for (const [id] of this.voices) this.release(id, 0.04);
     }
@@ -261,6 +284,9 @@ export class AudioEngine {
   }
 
   // ---- internals ---------------------------------------------------------
+
+  private getPreset = () => PRESETS[this.settings.preset];
+  private getVocal = (): VocalSettings => this.vocalSettings;
 
   private release(id: number, seconds: number): void {
     const ctx = this.ctx;
@@ -271,28 +297,26 @@ export class AudioEngine {
     const tc = Math.max(seconds, 0.02) / 4;
     v.env.gain.setTargetAtTime(0, now, tc);
     const end = now + tc * 9 + 0.02; // ~ -75 dB below peak, then hard stop
-    for (const osc of v.oscs) osc.stop(end);
-    v.oscs[0].onended = () => this.cleanup(v);
+    for (const src of v.sources) src.stop(end);
+    v.sources[0].onended = () => this.cleanup(v);
     this.fading.add(v);
   }
 
-  private cleanup(v: Voice): void {
-    const lfoGain = this.graph?.lfoGain;
-    for (const osc of v.oscs) {
-      if (lfoGain) {
-        try {
-          lfoGain.disconnect(osc.detune);
-        } catch {
-          // already disconnected
-        }
-      }
-      osc.disconnect();
-    }
-    for (const m of v.mixes) m.disconnect();
-    v.filter.disconnect();
-    v.env.disconnect();
+  private cleanup(v: VoiceHandle): void {
+    v.disconnect();
     this.fading.delete(v);
   }
+
+  private wave = (width: number): PeriodicWave => {
+    const key = Math.round(width * 1000);
+    let w = this.waves.get(key);
+    if (!w) {
+      const { real, imag } = pulseWaveCoeffs(key / 1000);
+      w = this.ctx!.createPeriodicWave(real, imag);
+      this.waves.set(key, w);
+    }
+    return w;
+  };
 
   private build(): void {
     const ctx = this.createContext();
@@ -352,6 +376,12 @@ export class AudioEngine {
     const mute = ctx.createGain();
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
+    // Tuner spectrum: tapped before master volume/mute and before the reference player joins at master.
+    const spectrum = ctx.createAnalyser();
+    spectrum.fftSize = 2048;
+    spectrum.smoothingTimeConstant = 0.8;
+    spectrum.minDecibels = -100;
+    spectrum.maxDecibels = -20;
 
     voiceBus.connect(dry);
     dry.connect(comp);
@@ -364,11 +394,12 @@ export class AudioEngine {
     chorusWet.connect(comp);
     reverbWet.connect(comp);
     comp.connect(master);
+    comp.connect(spectrum);
     master.connect(mute);
     mute.connect(analyser);
     mute.connect(ctx.destination);
 
-    // One shared vibrato LFO; each voice taps it into its oscillator detune. Depth 0 = off.
+    // One shared vibrato LFO for the lead; each lead voice taps it into its oscillator detune. Depth 0 = off.
     const lfo = ctx.createOscillator();
     lfo.frequency.value = 5.5;
     const lfoGain = ctx.createGain();
@@ -376,7 +407,13 @@ export class AudioEngine {
     lfo.connect(lfoGain);
     lfo.start();
 
-    this.graph = { voiceBus, master, mute, wet, chorusWet, reverbWet, rhythmBus, lfoGain, analyser };
+    // Looped white noise shared by every vocal voice's breath source.
+    const noise = ctx.createBuffer(1, Math.max(1, Math.round(ctx.sampleRate)), ctx.sampleRate);
+    const nd = noise.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+    this.vocalShared = { wave: this.wave, noise };
+
+    this.graph = { voiceBus, master, mute, wet, chorusWet, reverbWet, rhythmBus, lfoGain, analyser, spectrum };
     ctx.onstatechange = () => this.emitState();
     if (typeof document !== "undefined") document.addEventListener("visibilitychange", this.onVisibility);
     this.applyGlobal();
@@ -389,20 +426,19 @@ export class AudioEngine {
     const s = this.settings;
     const p = PRESETS[s.preset];
     const now = ctx.currentTime;
+    // Effect sends follow the current instrument; the vocal has no echo so its timbre stays clear.
+    const echo = s.instrument === "vocal" ? 0 : p.wet;
+    const chorus = s.instrument === "vocal" ? s.vocal.chorus : p.chorus;
+    const reverb = s.instrument === "vocal" ? s.vocal.reverb : p.reverb;
     g.master.gain.setTargetAtTime(s.volume * s.volume, now, PARAM_TC); // squared: closer to perceived loudness
     g.mute.gain.setTargetAtTime(s.muted ? 0 : 1, now, PARAM_TC);
-    g.wet.gain.setTargetAtTime(s.effects ? p.wet : 0, now, 0.05);
+    g.wet.gain.setTargetAtTime(s.effects ? echo : 0, now, 0.05);
     g.rhythmBus.gain.setTargetAtTime(s.rhythmVolume, now, PARAM_TC);
-    g.chorusWet.gain.setTargetAtTime(s.effects ? p.chorus : 0, now, 0.05);
-    g.reverbWet.gain.setTargetAtTime(s.effects ? p.reverb : 0, now, 0.05);
+    g.chorusWet.gain.setTargetAtTime(s.effects ? chorus : 0, now, 0.05);
+    g.reverbWet.gain.setTargetAtTime(s.effects ? reverb : 0, now, 0.05);
     g.lfoGain.gain.setTargetAtTime(s.modulation ? VIBRATO_CENTS : 0, now, 0.1);
-    // Preset switches apply to notes that are already sounding.
-    for (const v of this.voices.values()) {
-      for (let i = 0; i < v.mixes.length; i++) v.mixes[i].gain.setTargetAtTime(p.mix[i], now, 0.03);
-      for (let i = 1; i < v.oscs.length; i++) v.oscs[i].detune.setTargetAtTime(DETUNE_SIGN[i] * p.detune, now, 0.03);
-      v.filter.Q.setTargetAtTime(p.q, now, 0.03);
-      v.filter.frequency.setTargetAtTime(cutoffHz(p, v.brightness), now, 0.03);
-    }
+    // Setting changes apply to notes that are already sounding.
+    for (const v of this.voices.values()) v.refresh(now);
   }
 
   private emitState(): void {

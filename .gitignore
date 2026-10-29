@@ -2,3 +2,5 @@ node_modules
 dist
 *.log
 .env
+# local reference recordings: analysed on this machine only, never committed or published
+ref/

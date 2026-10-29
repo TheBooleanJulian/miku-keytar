@@ -3,6 +3,15 @@ import { PATTERNS } from "./audio/patterns.ts";
 import { SCALES, type ScaleId } from "./audio/pitchmap.ts";
 import type { RhythmLayers } from "./audio/rhythm.ts";
 import { PRESETS, type PresetId } from "./audio/presets.ts";
+import type { Instrument } from "./audio/engine.ts";
+import {
+  BUILTIN_VOCAL,
+  cloneVocal,
+  sanitizeVocal,
+  type VocalAxis,
+  type VocalParams,
+} from "./audio/vocal/params.ts";
+import { USER_PREFIX } from "./vocalStore.ts";
 
 export interface Settings {
   volume: number;
@@ -31,6 +40,13 @@ export interface Settings {
   bpm: number;
   layers: RhythmLayers;
   rhythmVolume: number;
+  // vocal instrument
+  instrument: Instrument; // "lead" is the original keytar sound; nothing changes unless the user picks "vocal"
+  vocal: VocalParams; // the tuner's working (edited) parameters
+  vocalPreset: string; // "bright" | "soft" | "electronic" | "user:<name>": the base the edits started from
+  vocalCompare: "edited" | "default"; // A/B: play the edits, or the untouched preset
+  vocalAxis: VocalAxis;
+  auditionNote: number; // MIDI note played by the tuner's audition button
 }
 
 const KEY = "miku-keytar:settings:v1";
@@ -50,7 +66,14 @@ export function defaultSettings(): Settings {
   }
   return {
     // Phones start in landscape even when held upright; desktop just matches its window.
-    orientation: coarse || window.innerWidth >= window.innerHeight ? "landscape" : "portrait",
+    orientation:
+      coarse || typeof window === "undefined" || window.innerWidth >= window.innerHeight ? "landscape" : "portrait",
+    instrument: "lead",
+    vocal: cloneVocal(BUILTIN_VOCAL.miku.params), // fresh installs start on the reference-fitted preset
+    vocalPreset: "miku",
+    vocalCompare: "edited",
+    vocalAxis: "morph",
+    auditionNote: 60,
     keyRoot: 0,
     keyMode: "major",
     sevenths: false,
@@ -84,13 +107,8 @@ function bool(v: unknown, fallback: boolean): boolean {
   return typeof v === "boolean" ? v : fallback;
 }
 
-/** Reads saved preferences, ignoring anything missing or invalid. Never throws. */
-export function loadSettings(): Settings {
-  const d = defaultSettings();
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return d;
-    const s = JSON.parse(raw) as Record<string, unknown>;
+/** Validates a parsed settings object field by field; anything missing or invalid takes the default. */
+export function parseSettings(s: Record<string, unknown>, d: Settings): Settings {
     const layers = (typeof s.layers === "object" && s.layers !== null ? s.layers : {}) as Record<string, unknown>;
     return {
       volume: typeof s.volume === "number" && s.volume >= 0 && s.volume <= 1 ? s.volume : d.volume,
@@ -121,7 +139,26 @@ export function loadSettings(): Settings {
         arp: bool(layers.arp, true),
       },
       rhythmVolume: typeof s.rhythmVolume === "number" && s.rhythmVolume >= 0 && s.rhythmVolume <= 1 ? s.rhythmVolume : d.rhythmVolume,
+      instrument: s.instrument === "vocal" || s.instrument === "lead" ? s.instrument : d.instrument,
+      vocal: sanitizeVocal(s.vocal, d.vocal),
+      vocalPreset:
+        typeof s.vocalPreset === "string" &&
+        (s.vocalPreset in BUILTIN_VOCAL || (s.vocalPreset.startsWith(USER_PREFIX) && s.vocalPreset.length <= 40))
+          ? s.vocalPreset
+          : d.vocalPreset,
+      vocalCompare: s.vocalCompare === "default" || s.vocalCompare === "edited" ? s.vocalCompare : d.vocalCompare,
+      vocalAxis: s.vocalAxis === "morph" || s.vocalAxis === "fixed" ? s.vocalAxis : d.vocalAxis,
+      auditionNote: int(s.auditionNote, 36, 96, d.auditionNote),
     };
+}
+
+/** Reads saved preferences, ignoring anything missing or invalid. Never throws. */
+export function loadSettings(): Settings {
+  const d = defaultSettings();
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return d;
+    return parseSettings(JSON.parse(raw) as Record<string, unknown>, d);
   } catch {
     return d;
   }

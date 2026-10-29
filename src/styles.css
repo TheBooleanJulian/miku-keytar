@@ -341,12 +341,16 @@ input:focus-visible {
 /* Landscape layout: side panel. Keyed off the app's chosen orientation, not the screen's. */
 .app.land .panel {
   left: auto;
-  top: 0;
+  top: calc(var(--sa-top) + 56px); /* starts below the icon row, so the icons never cover panel content */
   width: min(340px, 45%);
   max-height: none;
-  padding-top: calc(var(--sa-top) + 60px);
-  border-top: 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
   border-left: 1px solid var(--line);
+}
+
+.app.land .panel.tuner {
+  width: min(460px, 58%);
 }
 
 .panel-head {
@@ -492,6 +496,95 @@ input[type="range"] {
   flex-direction: column;
   gap: 12px;
   padding: 4px 12px 12px;
+}
+
+/* ---- vocal tuner ---- */
+.spectrum {
+  display: block;
+  width: 100%;
+  height: 150px;
+  background: var(--void);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.legend {
+  line-height: 1.5;
+}
+
+.c-teal {
+  color: var(--teal);
+}
+
+.c-gold {
+  color: var(--gold);
+}
+
+.c-pink {
+  color: #ff2bd6;
+}
+
+.field em {
+  font-style: normal;
+  font-family: var(--mono);
+  color: var(--cyan);
+}
+
+.vowels {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+
+.btn.vowel {
+  font-size: 20px;
+  padding: 8px 0;
+  min-height: 48px;
+}
+
+.btn.vowel.on {
+  background: var(--teal);
+  border-color: var(--teal);
+  color: var(--void);
+}
+
+.text {
+  flex: 1;
+  min-width: 0;
+  font: 14px var(--sans);
+  color: var(--text);
+  background: var(--void);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px;
+  min-height: 40px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.formant-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.formant-row b {
+  font-size: 12px;
+  color: var(--gold);
+}
+
+input[type="file"] {
+  font: 13px var(--sans);
+  color: var(--muted);
+  max-width: 100%;
+}
+
+.error {
+  margin: 0;
+  color: var(--gold);
+  font-size: 13px;
 }
 
 .hint {
