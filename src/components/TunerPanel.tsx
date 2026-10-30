@@ -8,12 +8,12 @@ import {
   VOWELS,
   VOWEL_ORDER,
   formantScale,
+  formantsInto,
   identityTweaks,
   makeFormants,
-  morphInto,
-  tweakInto,
   vowelPosition,
   type FormantTweak,
+  type VowelId,
 } from "../audio/vocal/formants.ts";
 import {
   BUILTIN_VOCAL,
@@ -40,7 +40,7 @@ interface Props {
   onClose: () => void;
 }
 
-type NumericKey = Exclude<keyof VocalParams, "tweaks">;
+type NumericKey = Exclude<keyof VocalParams, "tweaks" | "vowelTweaks">;
 
 function Slider({
   label,
@@ -82,6 +82,8 @@ export function TunerPanel({ engine, reference, settings: s, update, users, onSa
   const v = s.vocal;
   const [saveName, setSaveName] = useState("");
   const [refError, setRefError] = useState<string | null>(null);
+  // which vowel the formant sliders edit: every vowel, or one (their adjustments blend into neighbouring vowels)
+  const [scope, setScope] = useState<"all" | VowelId>("all");
   const [, rerender] = useReducer((n: number) => n + 1, 0);
   useEffect(() => reference.onChange(rerender), [reference]);
 
@@ -98,8 +100,11 @@ export function TunerPanel({ engine, reference, settings: s, update, users, onSa
       onChange={(n) => edit({ [key]: n } as Partial<VocalParams>)}
     />
   );
-  const editTweak = (i: number, patch: Partial<FormantTweak>) =>
-    edit({ tweaks: v.tweaks.map((t, k) => (k === i ? { ...t, ...patch } : t)) });
+  const scoped = (): FormantTweak[] => (scope === "all" ? v.tweaks : v.vowelTweaks[scope]);
+  const editTweak = (i: number, patch: Partial<FormantTweak>) => {
+    const next = scoped().map((t, k) => (k === i ? { ...t, ...patch } : t));
+    edit(scope === "all" ? { tweaks: next } : { vowelTweaks: { ...v.vowelTweaks, [scope]: next } });
+  };
 
   const slot = s.instrument === "lead" ? "lead" : s.vocalCompare;
   const setSlot = (next: "lead" | "default" | "edited") =>
@@ -109,8 +114,7 @@ export function TunerPanel({ engine, reference, settings: s, update, users, onSa
 
   // Effective formant values at the panel's vowel position, shown beside the sliders.
   const fm = makeFormants();
-  morphInto(fm, v.vowelPos);
-  tweakInto(fm, v.tweaks, formantScale(440 * Math.pow(2, (s.auditionNote - 69) / 12), v.tracking));
+  formantsInto(fm, v.vowelPos, v.tweaks, v.vowelTweaks, formantScale(440 * Math.pow(2, (s.auditionNote - 69) / 12), v.tracking));
 
   const auditionDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
@@ -119,7 +123,7 @@ export function TunerPanel({ engine, reference, settings: s, update, users, onSa
     } catch {
       // pointer already gone
     }
-    engine.noteOn(AUDITION_ID, s.auditionNote, s.vocalAxis === "morph" ? v.vowelPos : 0.5);
+    engine.noteOn(AUDITION_ID, s.auditionNote, s.vocalAxis === "morph" ? v.vowelPos : v.brightness);
   };
   const auditionUp = () => engine.noteOff(AUDITION_ID);
 
@@ -165,7 +169,9 @@ export function TunerPanel({ engine, reference, settings: s, update, users, onSa
         reference={reference}
         vowelPos={v.vowelPos}
         tweaks={v.tweaks}
+        vowelTweaks={v.vowelTweaks}
         tracking={v.tracking}
+        hold={v.vowelHold}
         axis={s.vocalAxis}
         yRef={yRef}
         note={s.auditionNote}
@@ -258,7 +264,8 @@ export function TunerPanel({ engine, reference, settings: s, update, users, onSa
             })}
           </div>
         </div>
-        {num("vowelPos", "Vowel morph (う → お → あ → え → い)", 0.01)}
+        {num("vowelPos", "Vowel (あ → い → う → え → お)", 0.01)}
+        {num("vowelHold", "Vowel hold (higher = the slide rests on each vowel)", 0.01)}
         <div className="field">
           <span>Vertical axis while playing</span>
           <div className="seg" role="radiogroup" aria-label="Vertical axis">
@@ -331,9 +338,20 @@ export function TunerPanel({ engine, reference, settings: s, update, users, onSa
       </Group>
 
       <Group title="FORMANTS (F1–F5)">
+        <div className="field">
+          <span>Edit formants of</span>
+          <div className="seg" role="radiogroup" aria-label="Which vowel the formant sliders edit">
+            {([["all", "All"], ...VOWEL_ORDER.map((id) => [id, VOWELS[id].kana])] as ["all" | VowelId, string][]).map(([id, label]) => (
+              <button key={id} type="button" role="radio" aria-checked={scope === id} className={scope === id ? "on" : ""} onClick={() => setScope(id)}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
         <p className="hint">
-          Values are multipliers applied to every vowel. The Hz shown is where each resonance currently sits for the
-          vowel position above.
+          Values are multipliers. “All” applies to every vowel; choosing a vowel adjusts only that vowel and fades out into
+          its neighbours, so tuning あ cannot disturb い or う. The Hz shown is where each resonance currently sits for
+          the vowel position above.
         </p>
         {Array.from({ length: FORMANT_COUNT }, (_, i) => (
           <div key={i} className="formant-row">
@@ -342,7 +360,7 @@ export function TunerPanel({ engine, reference, settings: s, update, users, onSa
             </b>
             <Slider
               label="Frequency"
-              value={v.tweaks[i].freq}
+              value={scoped()[i].freq}
               min={TWEAK_LIMITS.freq[0]}
               max={TWEAK_LIMITS.freq[1]}
               step={0.01}
@@ -351,7 +369,7 @@ export function TunerPanel({ engine, reference, settings: s, update, users, onSa
             />
             <Slider
               label="Bandwidth"
-              value={v.tweaks[i].bw}
+              value={scoped()[i].bw}
               min={TWEAK_LIMITS.bw[0]}
               max={TWEAK_LIMITS.bw[1]}
               step={0.01}
@@ -360,7 +378,7 @@ export function TunerPanel({ engine, reference, settings: s, update, users, onSa
             />
             <Slider
               label="Gain"
-              value={v.tweaks[i].gain}
+              value={scoped()[i].gain}
               min={TWEAK_LIMITS.gain[0]}
               max={TWEAK_LIMITS.gain[1]}
               step={0.01}
@@ -369,8 +387,8 @@ export function TunerPanel({ engine, reference, settings: s, update, users, onSa
             />
           </div>
         ))}
-        <button type="button" className="btn" onClick={() => edit({ tweaks: identityTweaks() })}>
-          Reset formants to neutral
+        <button type="button" className="btn" onClick={() => edit(scope === "all" ? { tweaks: identityTweaks() } : { vowelTweaks: { ...v.vowelTweaks, [scope]: identityTweaks() } })}>
+          Reset {scope === "all" ? "all-vowel" : VOWELS[scope].kana} formants to neutral
         </button>
       </Group>
 

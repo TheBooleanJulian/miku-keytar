@@ -15,9 +15,8 @@ import {
   FORMANT_COUNT,
   formantQ,
   formantScale,
+  formantsInto,
   makeFormants,
-  morphInto,
-  tweakInto,
 } from "./formants.ts";
 import { SAW_LEVEL, SINE_LEVEL, levelGain } from "./level.ts";
 import {
@@ -143,9 +142,14 @@ export function createVocalVoice(
 
   function applyFormants(t: number, tc: number): void {
     const s = getSettings();
-    morphInto(fm, effectiveVowelPos(s.params.vowelPos, yy, s.axis));
     lastScale = formantScale(curFreq, s.params.tracking);
-    tweakInto(fm, s.params.tweaks, lastScale);
+    formantsInto(
+      fm,
+      effectiveVowelPos(s.params.vowelPos, yy, s.axis, s.params.vowelHold),
+      s.params.tweaks,
+      s.params.vowelTweaks,
+      lastScale,
+    );
     for (let i = 0; i < FORMANT_COUNT; i++) {
       bands[i].frequency.setTargetAtTime(fm[i].freq, t, tc);
       bands[i].Q.setTargetAtTime(formantQ(fm[i].freq, fm[i].bw), t, tc);
@@ -185,8 +189,7 @@ export function createVocalVoice(
     tilt.frequency.value = brightnessToCutoff(eb);
     vib.frequency.value = p0.vibratoRate;
     driftG.gain.value = p0.jitter;
-    morphInto(fm, effectiveVowelPos(p0.vowelPos, yy, s0.axis));
-    tweakInto(fm, p0.tweaks, lastScale);
+    formantsInto(fm, effectiveVowelPos(p0.vowelPos, yy, s0.axis, p0.vowelHold), p0.tweaks, p0.vowelTweaks, lastScale);
     for (let i = 0; i < FORMANT_COUNT; i++) {
       bands[i].frequency.value = fm[i].freq;
       bands[i].Q.value = formantQ(fm[i].freq, fm[i].bw);

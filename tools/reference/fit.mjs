@@ -23,7 +23,8 @@ function dist(r, s) {
 }
 
 // parameter space: name -> [lo, hi, get(p), set(p, v)]
-const T = (i, k) => [(p) => p.tweaks[i][k], (p, v) => (p.tweaks[i][k] = v)];
+// the fit is written to the tweaks of あ only (the clips analysed so far hold あ), so the other vowels keep their natural formants
+const T = (i, k) => [(p) => p.vowelTweaks.a[i][k], (p, v) => (p.vowelTweaks.a[i][k] = v)];
 const SPACE = {
   pulseWidth: [0.1, 0.5, (p) => p.pulseWidth, (p, v) => (p.pulseWidth = v)],
   saw: [0, 0.8, (p) => p.saw, (p, v) => (p.saw = v)],
@@ -40,7 +41,7 @@ const SPACE = {
   F5gain: [0, 1.6, ...T(4, "gain")],
 };
 
-const base = JSON.parse(await synth.params({ ...VIB, vowelPos: 0.5 })); // Bright Vocal + matched vibrato, vowel あ
+const base = { ...(await synth.builtin("bright")), ...VIB, vowelPos: 0.5 }; // start from Bright Vocal with matched vibrato, vowel あ
 const evals = { n: 0 };
 async function score(p, notes, detail = false) {
   const rows = [];

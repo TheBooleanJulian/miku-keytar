@@ -69,6 +69,10 @@ export async function startSynth(outDir) {
       const buf = Buffer.from(b64, "base64");
       return new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);
     },
+    /** Parameters of a built-in preset ("miku", "bright", "soft", "electronic") as a plain object. */
+    async builtin(id) {
+      return JSON.parse(await evalJs(`JSON.stringify(window.__params.BUILTIN_VOCAL[${JSON.stringify(id)}].params)`));
+    },
     async params(patch, base) {
       return evalJs(`(() => { const P = window.__params; const b = ${base ? `P.sanitizeVocal(${JSON.stringify(base)})` : "P.defaultVocal()"}; return JSON.stringify(P.sanitizeVocal(Object.assign({}, b, ${JSON.stringify(patch ?? {})}), b)); })()`);
     },

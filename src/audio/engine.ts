@@ -194,7 +194,7 @@ export class AudioEngine {
   controlLabel(y: number): string {
     const s = this.settings;
     if (s.instrument === "vocal") {
-      const pos = effectiveVowelPos(s.vocal.vowelPos, y, s.vocalAxis);
+      const pos = effectiveVowelPos(s.vocal.vowelPos, y, s.vocalAxis, s.vocal.vowelHold);
       return `vowel ${vowelLabel(pos)} · ${s.vocalAxis === "morph" ? "morph" : "fixed"} ${Math.round(pos * 100)}%`;
     }
     return `brightness ${Math.round(y * 100)}% · ${Math.round(this.cutoffFor(y))} Hz`;

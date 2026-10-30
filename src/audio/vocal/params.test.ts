@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { FORMANT_COUNT, formantScale, makeFormants, morphInto, tweakInto } from "./formants.ts";
+import {
+  FORMANT_COUNT,
+  VOWEL_ORDER,
+  formantScale,
+  identityTweaks,
+  makeFormants,
+  morphInto,
+  tweakInto,
+} from "./formants.ts";
 import {
   BUILTIN_VOCAL,
   BUILTIN_VOCAL_IDS,
@@ -40,9 +48,14 @@ test("the reference-fitted preset encodes what was measured, and leaves the othe
   // measured on the reference: 3.3 Hz vibrato about +-40 cents; much less energy around 3 kHz; some breath
   assert.ok(miku.vibratoRate >= 3 && miku.vibratoRate <= 3.6);
   assert.ok(miku.vibratoDepth >= 30 && miku.vibratoDepth <= 45);
-  assert.ok(miku.tweaks[2].gain < bright.tweaks[2].gain / 2, "F3 (2.8 kHz) must be well below Bright Vocal's");
-  assert.ok(miku.tweaks[1].bw > 1.2, "broader second formant");
+  assert.ok(miku.vowelTweaks.a[2].gain < 0.5, "F3 (2.8 kHz) of あ must be well below the natural value");
+  assert.ok(miku.vowelTweaks.a[1].bw > 1.2, "broader second formant of あ");
   assert.ok(miku.breath > bright.breath);
+  // ...and the fit belongs to あ alone: it must not touch the other vowels or the global tweaks
+  assert.deepEqual(miku.tweaks, defaultVocal().tweaks.map(() => ({ freq: 1, bw: 1, gain: 1 })));
+  for (const id of ["i", "u", "e", "o"] as const) {
+    assert.deepEqual(miku.vowelTweaks[id], identityTweaks(), `${id} must keep its natural formants`);
+  }
   // the older presets are unchanged
   assert.equal(bright.vibratoRate, 5.4);
   assert.equal(bright.vibratoDepth, 14);
@@ -116,11 +129,35 @@ test("vertical axis: morph mode moves the vowel, fixed mode moves brightness", (
   // morph: vowel follows the finger, brightness stays at the panel value
   assert.equal(effectiveVowelPos(0.5, 0.9, "morph"), 0.9);
   assert.equal(effectiveBrightness(0.6, 0.9, "morph"), 0.6);
-  // fixed: vowel stays at the panel value, brightness follows the finger around the panel value
+  // fixed: vowel stays at the panel value, brightness IS the finger's height over the whole range, like the lead
   assert.equal(effectiveVowelPos(0.5, 0.9, "fixed"), 0.5);
-  assert.equal(effectiveBrightness(0.6, 0.5, "fixed"), 0.6);
-  assert.ok(effectiveBrightness(0.6, 1, "fixed") > effectiveBrightness(0.6, 0, "fixed"));
-  assert.equal(effectiveBrightness(0.95, 1, "fixed"), 1);
+  assert.equal(effectiveBrightness(0.6, 0.5, "fixed"), 0.5);
+  assert.equal(effectiveBrightness(0.6, 0, "fixed"), 0);
+  assert.equal(effectiveBrightness(0.6, 1, "fixed"), 1);
+});
+
+test("per-vowel tweaks are sanitised and fall back to the base preset", () => {
+  const base = BUILTIN_VOCAL.miku.params;
+  const p = sanitizeVocal({ vowelTweaks: { i: [{ freq: 99, bw: -4, gain: 50 }], u: "junk", zzz: [] } }, base);
+  assert.deepEqual(p.vowelTweaks.i[0], { freq: 1.6, bw: 0.4, gain: 2 }); // clamped to the tweak limits
+  assert.deepEqual(p.vowelTweaks.i[1], base.vowelTweaks.i[1]); // missing entries fall back
+  assert.deepEqual(p.vowelTweaks.u, base.vowelTweaks.u); // wrong type falls back
+  assert.deepEqual(p.vowelTweaks.a, base.vowelTweaks.a); // absent vowel keeps the base (the あ fit survives)
+  assert.equal(Object.keys(p.vowelTweaks).length, VOWEL_ORDER.length);
+  for (const id of VOWEL_ORDER) assert.equal(p.vowelTweaks[id].length, FORMANT_COUNT);
+  // an old saved preset with no vowelTweaks at all loads cleanly
+  assert.equal(sanitizeVocal({ brightness: 0.3 }, base).vowelTweaks.a[2].gain, base.vowelTweaks.a[2].gain);
+});
+
+test("cloning is deep: editing a clone never changes the original preset", () => {
+  const original = BUILTIN_VOCAL.miku.params;
+  const copy = cloneVocal(original);
+  copy.vowelTweaks.a[2].gain = 9;
+  copy.vowelTweaks.i[0].freq = 9;
+  copy.tweaks[0].freq = 9;
+  assert.equal(original.vowelTweaks.a[2].gain, 0.15);
+  assert.equal(original.vowelTweaks.i[0].freq, 1);
+  assert.equal(original.tweaks[0].freq, 1);
 });
 
 test("pitch and vowel are independent: the same vowel gives the same formants at any pitch", () => {

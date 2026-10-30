@@ -2,10 +2,15 @@
 
 import {
   FORMANT_COUNT,
+  VOWEL_ORDER,
   clampTweak,
   identityTweaks,
+  identityVowelTweaks,
+  shapeVowelPos,
   vowelPosition,
   type FormantTweak,
+  type VowelId,
+  type VowelTweaks,
 } from "./formants.ts";
 
 /** How the vertical touch axis is used in vocal mode. */
@@ -21,8 +26,10 @@ export interface VocalParams {
   breath: number; // 0..1: filtered noise through the same vocal tract
   // vocal tract
   vowelPos: number; // 0..1 position on the vowel morph axis (used as-is in fixed mode)
+  vowelHold: number; // 0..1: the vertical sweep dwells on pure vowels (morph mode only)
   tracking: number; // 0..1: stylised pitch-dependent drift of the formants (0 = fully independent)
-  tweaks: FormantTweak[]; // per-resonance multipliers on frequency, bandwidth and gain
+  tweaks: FormantTweak[]; // per-resonance multipliers on frequency, bandwidth and gain, for every vowel
+  vowelTweaks: VowelTweaks; // the same, but for one vowel only (blended into its neighbours along the morph)
   // expression
   vibratoRate: number; // Hz
   vibratoDepth: number; // cents
@@ -36,7 +43,7 @@ export interface VocalParams {
   reverb: number;
 }
 
-type NumericKey = Exclude<keyof VocalParams, "tweaks">;
+type NumericKey = Exclude<keyof VocalParams, "tweaks" | "vowelTweaks">;
 
 export const VOCAL_LIMITS: Record<NumericKey, readonly [number, number]> = {
   pulse: [0, 1],
@@ -46,6 +53,7 @@ export const VOCAL_LIMITS: Record<NumericKey, readonly [number, number]> = {
   brightness: [0, 1],
   breath: [0, 1],
   vowelPos: [0, 1],
+  vowelHold: [0, 1],
   tracking: [0, 1],
   vibratoRate: [2, 9],
   vibratoDepth: [0, 80],
@@ -68,6 +76,15 @@ function withTweaks(over: Array<Partial<FormantTweak> | undefined>): FormantTwea
   return t;
 }
 
+function withVowelTweaks(over: Partial<Record<VowelId, Array<Partial<FormantTweak> | undefined>>>): VowelTweaks {
+  const vt = identityVowelTweaks();
+  for (const id of VOWEL_ORDER) {
+    const list = over[id];
+    if (list) vt[id] = withTweaks(list);
+  }
+  return vt;
+}
+
 export type BuiltinVocalId = "miku" | "bright" | "soft" | "electronic";
 
 export const BUILTIN_VOCAL: Record<BuiltinVocalId, { label: string; blurb: string; params: VocalParams }> = {
@@ -84,14 +101,20 @@ export const BUILTIN_VOCAL: Record<BuiltinVocalId, { label: string; blurb: strin
       brightness: 0.7,
       breath: 0.18,
       vowelPos: vowelPosition("a"),
+      vowelHold: 0.7,
       tracking: 0.25,
-      tweaks: withTweaks([
-        { freq: 1.015 },
-        { freq: 1.03, bw: 1.49 },
-        { freq: 1.0175, gain: 0.15 }, // the reference has a clear dip around 3 kHz
-        { gain: 0.6 },
-        { gain: 0.5 },
-      ]),
+      tweaks: withTweaks([]),
+      // The reference recording is a held あ, so its fit lives on あ only. Applying it to every vowel (as the first
+      // version did) cut F3 for い and え too, which removed most of what makes them sound like い and え.
+      vowelTweaks: withVowelTweaks({
+        a: [
+          { freq: 1.015 },
+          { freq: 1.03, bw: 1.49 },
+          { freq: 1.0175, gain: 0.15 }, // the reference has a clear dip around 3 kHz
+          { gain: 0.6 },
+          { gain: 0.5 },
+        ],
+      }),
       vibratoRate: 3.3, // measured on every steady note of the reference
       vibratoDepth: 40, // cents, peak
       vibratoDelay: 0.45, // the reference's onsets are not measurable, so this is a playing choice
@@ -114,8 +137,10 @@ export const BUILTIN_VOCAL: Record<BuiltinVocalId, { label: string; blurb: strin
       brightness: 0.7,
       breath: 0.06,
       vowelPos: vowelPosition("a"),
+      vowelHold: 0.5,
       tracking: 0.3,
       tweaks: withTweaks([undefined, { freq: 1.03 }, { gain: 1.35 }, { gain: 1.3 }, undefined]),
+      vowelTweaks: identityVowelTweaks(),
       vibratoRate: 5.4,
       vibratoDepth: 14,
       vibratoDelay: 0.35,
@@ -138,6 +163,7 @@ export const BUILTIN_VOCAL: Record<BuiltinVocalId, { label: string; blurb: strin
       brightness: 0.4,
       breath: 0.14,
       vowelPos: vowelPosition("a"),
+      vowelHold: 0.4,
       tracking: 0.25,
       tweaks: withTweaks([
         { bw: 1.25 },
@@ -146,6 +172,7 @@ export const BUILTIN_VOCAL: Record<BuiltinVocalId, { label: string; blurb: strin
         { bw: 1.25, gain: 0.55 },
         { bw: 1.25, gain: 0.4 },
       ]),
+      vowelTweaks: identityVowelTweaks(),
       vibratoRate: 5,
       vibratoDepth: 10,
       vibratoDelay: 0.5,
@@ -168,6 +195,7 @@ export const BUILTIN_VOCAL: Record<BuiltinVocalId, { label: string; blurb: strin
       brightness: 0.88,
       breath: 0.03,
       vowelPos: vowelPosition("a"),
+      vowelHold: 0.6,
       tracking: 0.45,
       tweaks: withTweaks([
         { gain: 1.1 },
@@ -176,6 +204,7 @@ export const BUILTIN_VOCAL: Record<BuiltinVocalId, { label: string; blurb: strin
         { gain: 1.4 },
         undefined,
       ]),
+      vowelTweaks: identityVowelTweaks(),
       vibratoRate: 6.2,
       vibratoDepth: 22,
       vibratoDelay: 0.2,
@@ -192,7 +221,9 @@ export const BUILTIN_VOCAL: Record<BuiltinVocalId, { label: string; blurb: strin
 export const BUILTIN_VOCAL_IDS = Object.keys(BUILTIN_VOCAL) as BuiltinVocalId[];
 
 export function cloneVocal(p: VocalParams): VocalParams {
-  return { ...p, tweaks: p.tweaks.map((t) => ({ ...t })) };
+  const vowelTweaks = identityVowelTweaks();
+  for (const id of VOWEL_ORDER) vowelTweaks[id] = p.vowelTweaks[id].map((t) => ({ ...t }));
+  return { ...p, tweaks: p.tweaks.map((t) => ({ ...t })), vowelTweaks };
 }
 
 export function defaultVocal(): VocalParams {
@@ -212,6 +243,14 @@ export function sanitizeVocal(raw: unknown, base: VocalParams = defaultVocal()):
   out.tweaks = Array.from({ length: FORMANT_COUNT }, (_, i) =>
     clampTweak((tw[i] as Partial<FormantTweak> | undefined) ?? base.tweaks[i]),
   );
+  // per-vowel tweaks: anything missing or malformed falls back to the base preset's values for that vowel
+  const vt = (typeof src.vowelTweaks === "object" && src.vowelTweaks !== null ? src.vowelTweaks : {}) as Record<string, unknown>;
+  for (const id of VOWEL_ORDER) {
+    const list = Array.isArray(vt[id]) ? (vt[id] as unknown[]) : [];
+    out.vowelTweaks[id] = Array.from({ length: FORMANT_COUNT }, (_, i) =>
+      clampTweak((list[i] as Partial<FormantTweak> | undefined) ?? base.vowelTweaks[id][i]),
+    );
+  }
   return out;
 }
 
@@ -242,15 +281,14 @@ export function brightnessToCutoff(brightness: number): number {
 
 /**
  * In morph mode the vertical axis picks the vowel, so brightness is exactly the panel value. In fixed-vowel mode
- * the vertical axis nudges brightness around the panel value (±0.4), like the lead's brightness axis.
+ * the vertical axis IS the brightness over its whole range, exactly like the lead's brightness axis.
  */
 export function effectiveBrightness(base: number, y: number, axis: VocalAxis): number {
   if (axis === "morph") return base;
-  const b = base + (y - 0.5) * 0.8;
-  return b < 0 ? 0 : b > 1 ? 1 : b;
+  return y < 0 ? 0 : y > 1 ? 1 : y;
 }
 
-/** Vowel position to use: the finger in morph mode, the panel value in fixed mode. */
-export function effectiveVowelPos(base: number, y: number, axis: VocalAxis): number {
-  return axis === "morph" ? Math.min(1, Math.max(0, y)) : base;
+/** Vowel position to use: the finger (with vowel hold applied) in morph mode, the panel value in fixed mode. */
+export function effectiveVowelPos(base: number, y: number, axis: VocalAxis, hold = 0): number {
+  return axis === "morph" ? shapeVowelPos(y, hold) : base;
 }

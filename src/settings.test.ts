@@ -39,7 +39,7 @@ test("vocal settings round-trip and are sanitised", () => {
       vocalPreset: "user:mine",
       vocalCompare: "default",
       auditionNote: 72,
-      vocal: { brightness: 0.2, breath: 50 },
+      vocal: { brightness: 0.2, breath: 50, vowelTweaks: {} }, // current format (has vowelTweaks), partly invalid
     },
     d,
   );
@@ -50,6 +50,37 @@ test("vocal settings round-trip and are sanitised", () => {
   assert.equal(s.auditionNote, 72);
   assert.equal(s.vocal.brightness, 0.2);
   assert.equal(s.vocal.breath, 1);
+});
+
+test("vocal edits saved before per-vowel tweaks are replaced by their preset (they carried the old global F3 cut)", () => {
+  const d = defaultSettings();
+  const oldSaved = {
+    vocalPreset: "miku",
+    vocal: { ...BUILTIN_VOCAL.miku.params, vowelTweaks: undefined, tweaks: [{ freq: 1, bw: 1, gain: 1 }, { freq: 1, bw: 1.49, gain: 1 }, { freq: 1, bw: 1, gain: 0.15 }] },
+  };
+  const s = parseSettings(JSON.parse(JSON.stringify(oldSaved)), d);
+  assert.equal(s.vocalPreset, "miku");
+  assert.equal(s.vocal.tweaks[2].gain, 1, "the global F3 cut must be gone");
+  assert.equal(s.vocal.vowelTweaks.a[2].gain, 0.15, "...and live on あ only");
+  assert.equal(s.vocal.vowelTweaks.i[2].gain, 1);
+  // an old edit on top of a different built-in preset returns to that preset
+  const softSaved = { vocalPreset: "soft", vocal: { ...BUILTIN_VOCAL.soft.params, brightness: 0.9, vowelTweaks: undefined } };
+  const soft = parseSettings(JSON.parse(JSON.stringify(softSaved)), d); // JSON drops the undefined key, as real storage does
+  assert.equal(soft.vocalPreset, "soft");
+  assert.equal(soft.vocal.brightness, BUILTIN_VOCAL.soft.params.brightness);
+  // an old edit on a user preset falls back to the default preset
+  const user = parseSettings({ vocalPreset: "user:mine", vocal: { brightness: 0.1 } }, d);
+  assert.equal(user.vocalPreset, "miku");
+  assert.deepEqual(user.vocal, BUILTIN_VOCAL.miku.params);
+});
+
+test("current-format vocal edits are kept", () => {
+  const d = defaultSettings();
+  const edited = { ...BUILTIN_VOCAL.miku.params, brightness: 0.2, vowelHold: 0.1 };
+  const s = parseSettings(JSON.parse(JSON.stringify({ vocalPreset: "miku", vocal: edited })), d);
+  assert.equal(s.vocal.brightness, 0.2);
+  assert.equal(s.vocal.vowelHold, 0.1);
+  assert.deepEqual(s.vocal.vowelTweaks, BUILTIN_VOCAL.miku.params.vowelTweaks);
 });
 
 test("invalid vocal fields fall back to defaults", () => {
@@ -63,4 +94,14 @@ test("invalid vocal fields fall back to defaults", () => {
   assert.equal(s.vocalPreset, "miku");
   assert.equal(s.vocalCompare, "edited");
   assert.equal(s.auditionNote, 60);
+});
+
+test("a saved vowel keeps its identity when the morph order changed to あ い う え お", () => {
+  const d = defaultSettings();
+  const saved = { vocalPreset: "miku", vocal: { ...BUILTIN_VOCAL.miku.params, vowelPos: 0.5 } }; // 0.5 was あ in the old order
+  const s = parseSettings(JSON.parse(JSON.stringify(saved)), d);
+  assert.equal(s.vocal.vowelPos, 0); // あ is now the bottom of the axis
+  assert.equal(s.vowelOrder, "aiueo");
+  const again = parseSettings(JSON.parse(JSON.stringify(s)), d); // already migrated: untouched
+  assert.equal(again.vocal.vowelPos, 0);
 });

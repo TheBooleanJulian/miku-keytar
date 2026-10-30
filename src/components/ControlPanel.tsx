@@ -4,6 +4,7 @@ import { TapTempo } from "../audio/taptempo.ts";
 import { NOTE_NAMES, SCALES, type ScaleId } from "../audio/pitchmap.ts";
 import { PRESETS, type PresetId } from "../audio/presets.ts";
 import type { Layer } from "../audio/rhythm.ts";
+import { VOWELS, VOWEL_ORDER, nearestVowel, vowelPosition, type VowelId } from "../audio/vocal/formants.ts";
 import type { Settings } from "../settings.ts";
 
 interface Props {
@@ -115,18 +116,35 @@ export function ControlPanel({ settings: s, update, onStopAll, onClose, onOpenTu
             label="Vertical axis"
             value={s.vocalAxis}
             options={[
-              { value: "morph", label: "Vowel morph" },
+              { value: "morph", label: "Vowel morph (あ→お)" },
               { value: "fixed", label: "Fixed vowel + brightness" },
             ]}
             onChange={(vocalAxis) => update({ vocalAxis })}
           />
+        )}
+        {s.instrument === "vocal" && s.vocalAxis === "fixed" && (
+          <label className="field">
+            <span>Vowel</span>
+            <select
+              value={nearestVowel(s.vocal.vowelPos)}
+              onChange={(e) =>
+                update({ vocal: { ...s.vocal, vowelPos: vowelPosition(e.target.value as VowelId) }, vocalCompare: "edited" })
+              }
+            >
+              {VOWEL_ORDER.map((id) => (
+                <option key={id} value={id}>
+                  {VOWELS[id].kana} {VOWELS[id].ipa}
+                </option>
+              ))}
+            </select>
+          </label>
         )}
         <button type="button" className="btn" onClick={onOpenTuner}>
           Open vocal tuner
         </button>
         <p className="hint">
           {s.instrument === "vocal"
-            ? "Left–right is pitch. Up–down morphs the vowel (or brightens a fixed vowel)."
+            ? "Left–right is pitch. Up–down steps through あ い う え お (or sets the brightness of the chosen vowel)."
             : "The vocal engine is a synthetic, vowel-only voice. Switch to it to play sustained vowels."}
         </p>
       </Group>

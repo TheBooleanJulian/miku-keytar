@@ -103,12 +103,26 @@ or a finger does not click or alias. Everything is synthesised in the browser; t
 #### Pitch and vowel mapping
 
 - **Horizontal:** pitch, exactly as in the lead (same scales, snapping, glide, chord snapping and multi-touch).
-- **Vertical, "Vowel morph" (default):** a continuous morph through the five Japanese vowels. Bottom to top is
-  **う → お → あ → え → い**, an order in which neighbours are acoustically close (the second formant rises from う to い),
-  so the whole range is a smooth slide. Frequencies and bandwidths interpolate geometrically; gains linearly.
-- **Vertical, "Fixed vowel + brightness":** the vowel is whatever you choose in the tuner (あ い う え お buttons or the
-  morph slider), and the vertical axis nudges brightness (±0.4 around the panel value), like the lead's brightness axis.
+- **Vertical, "Vowel morph" (default):** bottom to top is **あ → い → う → え → お**, the order you recite them in.
+  The jumps between neighbours are large (い → う, え → お), so *Vowel hold* makes each vowel a flat zone and the
+  crossings quick. Frequencies and bandwidths interpolate geometrically; gains linearly.
+- **Vertical, "Fixed vowel + brightness":** pick the vowel from the **Vowel** dropdown in the Controls panel (also the
+  あ い う え お buttons in the tuner); the vertical axis is then the brightness over its whole range, exactly like the
+  lead's brightness axis, and left–right is pitch.
 - Chord buttons use the same voice at a lower level (in morph mode they sing あ).
+
+**Making the vowels read clearly.** Two things matter more than the exact formant numbers:
+
+1. **Each vowel has its own brightness.** The front vowels (い え) carry strong second and third formants and the back
+   vowels (う お) almost none, so the sweep changes the *spectral balance*, not just the position of F1. Measured at
+   C5, the energy at 2.5-4 kHz is about 25 dB higher on い than on う. This is audible on a phone speaker, which cannot
+   reproduce the low F1 differences between う, お and あ.
+2. **Vowel hold.** Moving a finger up a continuous slide spends most of its time on in-between blends. *Vowel hold*
+   (0 to 1) reshapes each span between two vowels with an S-curve, so the finger rests on the pure vowel across a wide
+   zone and crosses quickly between them. The Miku preset uses 0.7; set 0 for the plain linear slide.
+
+High notes are the limit: above about C5 the harmonics are too far apart to sample F1, and all five vowels drift towards あ
+(real singers have the same problem and tune F1 to the pitch). `vowels.mjs` in `tools/reference/` measures this.
 
 #### Controls (Vocal Tuner)
 
@@ -124,10 +138,11 @@ or a finger does not click or alias. Everything is synthesised in the browser; t
 | **Brightness** | Low-pass cutoff on the excitation (1.5 kHz to 12 kHz, logarithmic). |
 | **Breathiness** | Noise through the same vocal tract, with the periodic source slightly reduced. |
 | **Vibrato rate / depth / onset delay** | Per-voice vibrato (Hz, cents, seconds before it fades in). |
+| **Vowel hold** | How strongly the vertical slide rests on each pure vowel (see above). Morph mode only. |
 | **Pitch drift** | Very slow, per-voice random-ish wander in cents: a little life without a wobble. |
 | **Attack / Sustain / Release** | Envelope (sustain is the held level). Short attacks keep notes articulate. |
 | **Chorus / Reverb** | Sends into the shared effects. Bypassed by the Settings *Effects* switch. The vocal has no echo so the timbre stays clear. |
-| **F1-F5 Frequency / Bandwidth / Gain** | Per-resonance multipliers applied to every vowel. The header shows the current Hz and bandwidth for the panel vowel. |
+| **F1-F5 Frequency / Bandwidth / Gain** | Per-resonance multipliers. *Edit formants of* chooses **All** vowels or one vowel (あ い う え お): a single-vowel edit applies fully there and fades into its neighbours, so tuning あ cannot disturb い. The header shows the current Hz and bandwidth for the panel vowel. |
 
 All values are bounded and validated; nothing can be set outside a safe range, and saved or imported data is sanitised.
 
@@ -166,7 +181,7 @@ Because a pulse train keeps most of its energy in its fundamental, a note whose 
 than its neighbours (measured: up to 5x between adjacent semitones with fixed gains). Each voice therefore predicts its own
 output level from its harmonic series through its actual filter bank and scales to a fixed target (`vocal/level.ts`).
 Calibrated in Edge against the Square lead: the vocal averaged 1.08x the lead's RMS (about +0.7 dB), with a 1.4x
-(about 3 dB) spread across all five vowels and C3-E5. Wider sung bandwidths (150-320 Hz) also reduce the swing.
+(about 3 dB) spread across all five vowels and C3-E5. Because of this compensation the resonances can stay fairly narrow (80-270 Hz), which keeps the vowels distinct. あ keeps the wider 150-320 Hz bandwidths it was fitted with.
 To re-calibrate, run the dev server, measure `engine.getLevel()` via the dev-only `window.__keytar` hook and adjust
 `LEVEL_TARGET`.
 
@@ -174,13 +189,17 @@ To re-calibrate, run the dev server, measure `engine.getLevel()` via the dev-onl
 
 The default preset was fitted to a 26 s recording of a held あ sung from F3 to F6 (kept locally in `ref/`, which is
 git-ignored; the audio is not in this repository). `tools/reference/` repeats the process on any sustained-note clip
-(see its README). What the clip showed, measured with the engine's own offline render so the numbers describe shipping code:
+(see its README).
+
+The fit is stored as per-vowel tweaks on **あ alone**. The clip is a held あ, so it says nothing about the other vowels,
+and an earlier version that applied the fit to every vowel cut F3 for い and え too, which made the front vowels sound like
+う and お. What the clip showed, measured with the engine's own offline render so the numbers describe shipping code:
 
 | Measurement | Reference | Bright Vocal (before) | Change in "ref fit" |
 |---|---|---|---|
 | Vibrato | 3.3 Hz, about ±40 cents, on every note | 5.4 Hz, ±14 cents | 3.3 Hz, ±40 cents (onset delayed 0.45 s) |
-| Energy at 2.5-4 kHz | clear dip | about +14 dB too strong | F3 gain 0.15, F4 0.6, F5 0.5 |
-| Second formant | broad | narrow | bandwidth ×1.49 |
+| Energy at 2.5-4 kHz | clear dip | about +14 dB too strong | F3 gain 0.15, F4 0.6, F5 0.5 (**on あ only**) |
+| Second formant | broad | narrow | bandwidth ×1.49 (**on あ only**) |
 | Breath / noise | audible | 0.06 | 0.18 |
 | Vowel | あ fits best from F4 up (3.8-9 dB) | - | あ unchanged (F2 scan was flat at ×1.0) |
 
@@ -265,7 +284,11 @@ live readout writes to the DOM once per animation frame. The render loop skips d
 
 ## Testing
 
-### Automated (`npm test`, 85 tests)
+### Automated (`npm test`, 97 tests)
+- Vowel clarity: front vowels carry more upper-formant energy than back vowels; vowel hold maps vowels to themselves,
+  is monotonic, and gives flat zones around each vowel; per-vowel tweaks apply fully on their vowel and fade into the
+  neighbours; an edit on あ leaves い exactly unchanged; the reference-fitted あ is exactly the fitted values; the fit
+  does not touch the other vowels or the global tweaks.
 - Vocal formants: five Japanese vowels with ordered, in-range resonances; exact interpolation at every vowel endpoint,
   geometric midpoints, a continuous 400-step sweep with no jumps; clamping of positions and tweaks; filter Q ceiling;
   pitch has no effect on formants when tracking is 0.

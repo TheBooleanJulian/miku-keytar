@@ -31,35 +31,49 @@ export interface VowelInfo {
   formants: readonly Formant[];
 }
 
-// Sung bandwidths are wider than spoken ones: wide enough that a harmonic landing on a formant does not make a
-// note jump in loudness (measured: narrow 90 Hz F1 bands swung level by 5x between neighbouring pitches).
-const BW = [150, 170, 210, 260, 320];
-const GAIN = [1, 0.7, 0.45, 0.28, 0.16];
-
-function vowel(kana: string, ipa: string, freqs: number[], bwOverride?: Record<number, number>): VowelInfo {
+// Moderately narrow resonances keep the vowels distinct. A harmonic landing on a formant makes a note jump in loudness
+// (measured: up to 5x between neighbouring pitches), but vocal/level.ts now compensates for that per voice, so the
+// bandwidths no longer need to be widened to even it out.
+const BW = [100, 120, 160, 210, 270];
+function vowel(
+  kana: string,
+  ipa: string,
+  freqs: number[],
+  gains: number[],
+  bwOverride?: Record<number, number>,
+): VowelInfo {
   return {
     kana,
     ipa,
-    formants: freqs.map((freq, i) => ({ freq, bw: bwOverride?.[i] ?? BW[i], gain: GAIN[i] })),
+    formants: freqs.map((freq, i) => ({ freq, bw: bwOverride?.[i] ?? BW[i], gain: gains[i] })),
   };
 }
 
+// Gains differ per vowel because the vowels do: front vowels (い え) have a strong second formant, back vowels (う お)
+// a weak one. Using one gain table for all five made the vertical sweep sound much less like あいうえお.
+// あ keeps the original, wider bandwidths: it is the vowel that was matched against a reference recording.
 export const VOWELS: Record<VowelId, VowelInfo> = {
-  a: vowel("あ", "/a/", [850, 1350, 2800, 3500, 4500]),
-  i: vowel("い", "/i/", [330, 2750, 3300, 3800, 4700], { 0: 110 }),
-  u: vowel("う", "/ɯ/", [380, 1450, 2500, 3500, 4500]), // unrounded Japanese /ɯ/
-  e: vowel("え", "/e/", [550, 2400, 3000, 3700, 4600]),
-  o: vowel("お", "/o/", [560, 950, 2550, 3500, 4500]),
+  a: vowel("あ", "/a/", [850, 1350, 2800, 3500, 4500], [1, 0.7, 0.45, 0.28, 0.16], {
+    0: 150,
+    1: 170,
+    2: 210,
+    3: 260,
+    4: 320,
+  }),
+  i: vowel("い", "/i/", [330, 2750, 3300, 3800, 4700], [0.9, 2.2, 1.4, 0.5, 0.25], { 0: 80 }),
+  u: vowel("う", "/ɯ/", [380, 1450, 2500, 3500, 4500], [1, 0.25, 0.1, 0.06, 0.04]), // unrounded Japanese /ɯ/
+  e: vowel("え", "/e/", [550, 2400, 3000, 3700, 4600], [1, 1.5, 1, 0.45, 0.22]),
+  o: vowel("お", "/o/", [560, 950, 2550, 3500, 4500], [1, 0.35, 0.15, 0.08, 0.05]),
 };
 
 /** Selector order (the gojūon order: あ い う え お). */
 export const VOWEL_ORDER: readonly VowelId[] = ["a", "i", "u", "e", "o"];
 
 /**
- * Order used for the continuous morph: neighbours are acoustically close (second formant rises from う to い),
- * so every step is a gentle slide and the top of the range is the brightest vowel.
+ * Order of the vertical vowel sweep: the gojūon order, あ い う え お, so the finger walks the vowels in the order
+ * they are recited. Neighbours are not acoustically close (い → う and え → お jump), which is what vowel hold smooths.
  */
-export const MORPH_ORDER: readonly VowelId[] = ["u", "o", "a", "e", "i"];
+export const MORPH_ORDER: readonly VowelId[] = VOWEL_ORDER;
 const MORPH_SPANS = MORPH_ORDER.length - 1;
 
 export const FORMANT_LIMITS = {
@@ -85,6 +99,25 @@ export function makeFormants(): Formant[] {
 
 export function identityTweaks(): FormantTweak[] {
   return Array.from({ length: FORMANT_COUNT }, () => ({ ...IDENTITY_TWEAK }));
+}
+
+const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
+
+/**
+ * Makes the vertical sweep dwell on pure vowels. Each span between two neighbouring vowels is reshaped with a
+ * smooth S-curve, so the finger passes quickly through the in-between blends and rests on the vowels themselves.
+ * `hold` 0 leaves the sweep linear; 1 gives wide flat zones around each vowel. Vowel positions map to themselves.
+ */
+export function shapeVowelPos(pos: number, hold: number): number {
+  const p = clamp01(pos);
+  const h = clamp01(hold);
+  if (h === 0) return p;
+  const x = p * MORPH_SPANS;
+  const i = Math.min(Math.floor(x), MORPH_SPANS - 1);
+  const f = x - i;
+  const k = 1 + 3 * h;
+  const s = f < 0.5 ? 0.5 * Math.pow(2 * f, k) : 1 - 0.5 * Math.pow(2 * (1 - f), k);
+  return (i + s) / MORPH_SPANS;
 }
 
 /** Position (0..1) of a vowel on the morph axis. */
@@ -135,7 +168,50 @@ export function formantScale(f0: number, tracking: number): number {
   return s < 0.8 ? 0.8 : s > 1.4 ? 1.4 : s;
 }
 
-/** Applies the user's per-resonance tweaks and the pitch-dependent scale, then clamps everything to safe bounds. */
+/** Per-vowel adjustments: five tweak sets, one per vowel, blended along the morph axis. */
+export type VowelTweaks = Record<VowelId, FormantTweak[]>;
+
+export function identityVowelTweaks(): VowelTweaks {
+  return { a: identityTweaks(), i: identityTweaks(), u: identityTweaks(), e: identityTweaks(), o: identityTweaks() };
+}
+
+/**
+ * Blends the per-vowel tweak sets at a morph position, so an adjustment made for one vowel applies fully there and
+ * fades out towards its neighbours (frequency and bandwidth geometrically, gain linearly).
+ */
+export function vowelTweaksAt(out: FormantTweak[], vt: VowelTweaks, pos: number): void {
+  const x = clamp01(pos) * MORPH_SPANS;
+  const lo = Math.min(Math.floor(x), MORPH_SPANS - 1);
+  const t = x - lo;
+  const a = vt[MORPH_ORDER[lo]];
+  const b = vt[MORPH_ORDER[lo + 1]];
+  for (let i = 0; i < FORMANT_COUNT; i++) {
+    out[i].freq = a[i].freq * Math.pow(b[i].freq / a[i].freq, t);
+    out[i].bw = a[i].bw * Math.pow(b[i].bw / a[i].bw, t);
+    out[i].gain = a[i].gain + (b[i].gain - a[i].gain) * t;
+  }
+}
+
+const SCRATCH_TWEAKS: FormantTweak[] = identityTweaks();
+
+/**
+ * The formants actually sounded: the vowel at `pos`, then its per-vowel adjustments, then the global per-resonance
+ * tweaks and the pitch-dependent scale. Writes into `out` without allocating.
+ */
+export function formantsInto(
+  out: Formant[],
+  pos: number,
+  tweaks: readonly FormantTweak[],
+  vowelTweaks: VowelTweaks,
+  scale: number,
+): void {
+  morphInto(out, pos);
+  vowelTweaksAt(SCRATCH_TWEAKS, vowelTweaks, pos);
+  tweakInto(out, SCRATCH_TWEAKS, 1);
+  tweakInto(out, tweaks, scale);
+}
+
+/** Applies per-resonance tweaks and a frequency scale, then clamps everything to safe bounds. */
 export function tweakInto(out: Formant[], tweaks: readonly FormantTweak[], scale: number): void {
   for (let i = 0; i < FORMANT_COUNT; i++) {
     const t = tweaks[i] ?? IDENTITY_TWEAK;

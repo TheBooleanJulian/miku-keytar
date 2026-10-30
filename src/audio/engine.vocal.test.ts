@@ -160,7 +160,7 @@ test("existing lead mapping is preserved: brightness -> cutoff is unchanged and 
   assert.match(engine.controlLabel(0.5), /^brightness 50% · \d+ Hz$/);
   // the same engine reports a vowel when the vocal instrument is active
   engine.configure(base({ instrument: "vocal", vocalAxis: "morph" }));
-  assert.match(engine.controlLabel(0.5), /^vowel あ/);
+  assert.match(engine.controlLabel(0.5), /^vowel う/);
   assert.equal(engine.cutoffFor(0.5), cutoffHz(PRESETS.square, 0.5));
 });
 

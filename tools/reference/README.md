@@ -21,7 +21,7 @@ Environment: `BROWSER_PATH` (default: Edge on Windows), `DEV_URL` (default `http
 - `synth.mjs` renders the **real engine** offline in headless Edge (`OfflineAudioContext`), so the numbers describe the
   code that ships, not a model of it.
 - `fit.mjs` does coordinate descent over a small set of parameters (pulse width, saw/sine, brightness, breath, tracking,
-  F1/F2/F3 frequency, F2 bandwidth, F3-F5 gain) to minimise harmonic and band distance on the notes it is given, and
+  F1/F2/F3 frequency, F2 bandwidth, F3-F5 gain, all written to the tweaks of あ only) to minimise harmonic and band distance on the notes it is given, and
   reports a **holdout** error on notes it did not fit.
 
 ## Reading the results honestly
@@ -32,3 +32,16 @@ Environment: `BROWSER_PATH` (default: Edge on Windows), `DEV_URL` (default `http
 - The 100-300 Hz band holds room noise and rumble in most recordings; the evaluation scripts exclude it for notes above 300 Hz.
 - Recordings usually contain reverb, compression and MP3 loss; do not read every peak as a vowel formant.
 - The vibrato estimator was validated against the engine: set 3.3 Hz +-40 cents and it reads back 3.3 Hz +-40 cents.
+
+## Other tools
+
+```bash
+node tools/reference/distance.mjs ref/.analysis miku '{"breath":0.1}'   # how close is a preset (あ) to the analysed clip?
+node tools/reference/vowels.mjs   ref/.analysis miku '{"vowelHold":0}'  # are あいうえお recognisable across pitch?
+node tools/reference/shapes.mjs   ref/.analysis miku 262                # each vowel's harmonic envelope, as numbers
+```
+
+`vowels.mjs` renders all five vowels at six pitches (G3-G5), builds a pitch-independent spectral envelope for each, and
+classifies every rendering against templates from the *other* pitches. The percentage and the dB margin to the nearest
+wrong vowel are a proxy for how recognisable the vowels are; the "separation" row is how far apart they sit. It measures
+the spectrum, not what you hear: use it to compare two settings, and trust your ears over the absolute numbers.

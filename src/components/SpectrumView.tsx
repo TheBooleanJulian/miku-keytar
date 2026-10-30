@@ -3,11 +3,11 @@ import type { AudioEngine } from "../audio/engine.ts";
 import type { ReferencePlayer } from "../audio/reference.ts";
 import {
   FORMANT_COUNT,
-  makeFormants,
-  morphInto,
-  tweakInto,
   formantScale,
+  formantsInto,
+  makeFormants,
   type FormantTweak,
+  type VowelTweaks,
 } from "../audio/vocal/formants.ts";
 import { effectiveVowelPos, type VocalAxis } from "../audio/vocal/params.ts";
 
@@ -21,7 +21,9 @@ interface Props {
   reference: ReferencePlayer;
   vowelPos: number;
   tweaks: readonly FormantTweak[];
+  vowelTweaks: VowelTweaks;
   tracking: number;
+  hold: number;
   axis: VocalAxis;
   /** Latest vertical touch position 0..1, written by the pointer handler (read here, never rendered). */
   yRef: { current: number };
@@ -33,11 +35,11 @@ interface Props {
  * Live spectrum. Teal = measured output of the synth. Gold dashed lines = the formant centres the engine is
  * configured with (targets, not measurements). Magenta = the optional reference recording.
  */
-export function SpectrumView({ engine, reference, vowelPos, tweaks, tracking, axis, yRef, note }: Props) {
+export function SpectrumView({ engine, reference, vowelPos, tweaks, vowelTweaks, tracking, hold, axis, yRef, note }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   // Props change on every edit; the loop reads them through a ref so it never restarts.
-  const live = useRef({ vowelPos, tweaks, tracking, axis, note });
-  live.current = { vowelPos, tweaks, tracking, axis, note };
+  const live = useRef({ vowelPos, tweaks, vowelTweaks, tracking, hold, axis, note });
+  live.current = { vowelPos, tweaks, vowelTweaks, tracking, hold, axis, note };
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -130,9 +132,8 @@ export function SpectrumView({ engine, reference, vowelPos, tweaks, tracking, ax
 
       // configured formant centres (targets, not measurements)
       const s = live.current;
-      const pos = engine.activeVoiceCount > 0 ? effectiveVowelPos(s.vowelPos, yRef.current, s.axis) : s.vowelPos;
-      morphInto(fm, pos);
-      tweakInto(fm, s.tweaks, formantScale(440 * Math.pow(2, (s.note - 69) / 12), s.tracking));
+      const pos = engine.activeVoiceCount > 0 ? effectiveVowelPos(s.vowelPos, yRef.current, s.axis, s.hold) : s.vowelPos;
+      formantsInto(fm, pos, s.tweaks, s.vowelTweaks, formantScale(440 * Math.pow(2, (s.note - 69) / 12), s.tracking));
       ctx.setLineDash([4, 4]);
       ctx.strokeStyle = "#F5C842";
       ctx.fillStyle = "#F5C842";
